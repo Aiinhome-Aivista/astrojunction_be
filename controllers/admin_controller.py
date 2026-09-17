@@ -96,3 +96,64 @@ def update_user_status(user_id, is_active):
 
 def delete_user(user_id):
     return _manage_user('delete', user_id)
+
+def get_llm_config():
+    from services.settings_service import get_llm_config as fetch_llm_config
+    try:
+        config = fetch_llm_config()
+        return jsonify({"status": "success", "data": config}), 200
+    except Exception as e:
+        print(f"Error fetching LLM config: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def update_llm_config():
+    from flask import request
+    from services.settings_service import update_llm_config as save_llm_config, get_llm_config as fetch_llm_config
+    try:
+        payload = request.get_json(silent=True) or {}
+        save_llm_config(payload, updated_by="admin")
+        updated_config = fetch_llm_config()
+        return jsonify({
+            "status": "success",
+            "message": "LLM configuration updated successfully",
+            "data": updated_config
+        }), 200
+    except ValueError as ve:
+        return jsonify({"status": "error", "message": str(ve)}), 400
+    except Exception as e:
+        print(f"Error updating LLM config: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def test_llm_connection():
+    from flask import request
+    from services.settings_service import test_llm_connection as run_test, test_all_providers
+    try:
+        payload = request.get_json(silent=True) or {}
+        provider = payload.get("provider", "mistral_local")
+        config = payload.get("config", {})
+
+        if provider == "all":
+            results = test_all_providers()
+            return jsonify({"status": "success", "data": results}), 200
+
+        result = run_test(provider, config)
+        return jsonify({
+            "status": "success",
+            "data": {
+                "provider": provider,
+                "status": "ok" if result.get("success") else "error",
+                "message": result.get("message", "Test completed"),
+                "latency_ms": result.get("latency_ms", 0),
+            }
+        }), 200
+    except Exception as e:
+        print(f"Error testing LLM connection: {e}")
+        return jsonify({
+            "status": "success",
+            "data": {
+                "provider": provider if 'provider' in locals() else "unknown",
+                "status": "error",
+                "message": str(e),
+                "latency_ms": 0,
+            }
+        }), 200

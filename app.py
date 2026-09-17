@@ -400,6 +400,21 @@ def get_revenue_stats():
 def get_all_transactions():
     return admin_controller.get_all_transactions()
 
+@app.route("/api/admin/llm-config", methods=["GET"])
+# @require_auth
+def get_llm_config():
+    return admin_controller.get_llm_config()
+
+@app.route("/api/admin/llm-config", methods=["PUT", "POST"])
+# @require_auth
+def update_llm_config():
+    return admin_controller.update_llm_config()
+
+@app.route("/api/admin/llm-config/test", methods=["POST"])
+# @require_auth
+def test_llm_connection():
+    return admin_controller.test_llm_connection()
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Global error handler to catch exceptions and log them."""

@@ -232,6 +232,11 @@ def post_filtered_roadmap_predictions():
         
         if isinstance(insights_data, dict):
             insights_data["filter"] = filter_value
+            insights_data["horizon"] = selected_horizon
+            if "topics" in insights_data and isinstance(insights_data["topics"], list):
+                for topic in insights_data["topics"]:
+                    if isinstance(topic, dict):
+                        topic["timeframe"] = selected_horizon
 
         return jsonify({
             "status": "success",

@@ -5,14 +5,42 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+_db_pool = None
+
+
+def get_db_pool():
+    global _db_pool
+    if _db_pool is None:
+        try:
+            from mysql.connector import pooling
+            _db_pool = pooling.MySQLConnectionPool(
+                pool_name="jyotish_conn_pool",
+                pool_size=5,
+                pool_reset_session=True,
+                host=os.getenv("MYSQL_HOST", "localhost"),
+                port=int(os.getenv("MYSQL_PORT", 3306)),
+                user=os.getenv("MYSQL_USER", "root"),
+                password=os.getenv("MYSQL_PASSWORD", ""),
+                database=os.getenv("MYSQL_NAME", "jyotishveda"),
+            )
+        except Exception as e:
+            print(f"[DB Pool Warning] Could not initialize connection pool: {e}")
+            _db_pool = None
+    return _db_pool
+
+
 def get_db_connection():
     """
-    Opens a new MySQL connection using credentials from .env.
-    Callers are responsible for closing the connection (use the
-    `with get_db_connection() as conn:` pattern is NOT supported by
-    mysql-connector directly, so always close in a finally block or
-    use the call_procedure() helper below).
+    Returns a MySQL connection from the connection pool if available,
+    or falls back to a new direct connection.
+    Always close connections in a finally block to return them to the pool.
     """
+    pool = get_db_pool()
+    if pool:
+        try:
+            return pool.get_connection()
+        except Exception as e:
+            print(f"[DB Pool Warning] Pool connection error, falling back: {e}")
     return mysql.connector.connect(
         host=os.getenv("MYSQL_HOST", "localhost"),
         port=int(os.getenv("MYSQL_PORT", 3306)),

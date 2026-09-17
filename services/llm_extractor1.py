@@ -3,6 +3,7 @@ import re
 import os
 import requests
 from dotenv import load_dotenv
+from services.settings_service import get_setting
 
 load_dotenv()
 
@@ -46,12 +47,20 @@ Do NOT output plain text. DO NOT use custom keys like 'planet' or 'sign'. YOU MU
 
 def generate_facts_from_topic(topic):
     """শুধুমাত্র LLM-এর নিজস্ব জ্ঞান থেকে ডাটা আনার ফাংশন"""
-    llm_url = os.getenv("MISTRAL_LOCAL_URL", "http://122.163.121.176:3041")
-    model_name = os.getenv("MISTRAL_MODEL", "mistral:latest")
+    llm_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
+    model_name = get_setting("MISTRAL_MODEL", "mistral:latest")
     
-    api_endpoint = f"{llm_url.rstrip('/')}/v1/chat/completions"
+    if not llm_url:
+        print("[LLMExtractor] MISTRAL_LOCAL_URL is not configured in Admin Settings.")
+        return {"facts": []}
+
+    api_endpoint = f"{llm_url}/v1/chat/completions"
     if "api/" not in api_endpoint and "v1/" not in api_endpoint:
-        api_endpoint = f"{llm_url.rstrip('/')}/api/chat"
+        api_endpoint = f"{llm_url}/api/chat"
+
+    print(f"\n{'='*60}")
+    print(f"[LLM CALL - Extractor] Provider: mistral_local | Model/Version: {model_name} | Endpoint: {api_endpoint} | Topic: {topic}")
+    print(f"{'='*60}\n")
 
     prompt = f"Generate exhaustive Jyotish facts as a JSON object for the following TOPIC:\n\nTOPIC: {topic}"
 
@@ -65,11 +74,18 @@ def generate_facts_from_topic(topic):
         "stream": False
     }
 
+    response = None
     try:
-        response = requests.post(api_endpoint, json=payload, headers={"Content-Type": "application/json"})
+        response = requests.post(
+            api_endpoint,
+            json=payload,
+            headers={"Content-Type": "application/json", "Connection": "close"}
+        )
         response.raise_for_status()
         
         response_data = response.json()
+        returned_model = response_data.get("model", model_name)
+        print(f"[LLM RESPONSE - Extractor] Resolved Model/Version: {returned_model}")
         if "choices" in response_data:
             output = response_data["choices"][0]["message"]["content"].strip()
         elif "message" in response_data:
@@ -86,23 +102,29 @@ def generate_facts_from_topic(topic):
     except Exception as e:
         print(f"Error fetching data for topic '{topic}': {e}")
         return {"facts": []}
+    finally:
+        if response is not None:
+            response.close()
 
 
-def get_ai_response(system_prompt, messages, timeout=20, max_tokens=750):
-    llm_url = os.getenv(
-        "MISTRAL_LOCAL_URL",
-        "http://122.163.121.176:3041"
-    )
+def get_ai_response(system_prompt, messages, timeout=None, max_tokens=750):
+    if timeout is None:
+        try:
+            timeout = int(get_setting("LLM_TIMEOUT", "30"))
+        except Exception:
+            timeout = 30
+    llm_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
+    model_name = get_setting("MISTRAL_MODEL", "mistral:latest")
 
-    model_name = os.getenv(
-        "MISTRAL_MODEL",
-        "mistral:latest"
-    )
-
-    llm_url = llm_url.rstrip("/")
+    if not llm_url:
+        raise ValueError("MISTRAL_LOCAL_URL is not configured in Admin Settings.")
 
     # OpenAI-compatible endpoint
     api_endpoint = f"{llm_url}/v1/chat/completions"
+
+    print(f"\n{'='*60}")
+    print(f"[LLM CALL - Extractor AI Response] Provider: mistral_local | Model/Version: {model_name} | Endpoint: {api_endpoint}")
+    print(f"{'='*60}\n")
 
     payload = {
         "model": model_name,
@@ -118,12 +140,14 @@ def get_ai_response(system_prompt, messages, timeout=20, max_tokens=750):
         "stream": False
     }
 
+    response = None
     try:
         response = requests.post(
             api_endpoint,
             json=payload,
             headers={
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Connection": "close"
             },
             timeout=timeout
         )
@@ -131,6 +155,8 @@ def get_ai_response(system_prompt, messages, timeout=20, max_tokens=750):
         response.raise_for_status()
 
         response_data = response.json()
+        returned_model = response_data.get("model", model_name)
+        print(f"[LLM RESPONSE - Extractor AI Response] Resolved Model/Version: {returned_model}")
 
         # OpenAI-compatible response
         if "choices" in response_data:
@@ -148,4 +174,7 @@ def get_ai_response(system_prompt, messages, timeout=20, max_tokens=750):
     except Exception as e:
         print(f"LLM Error: {e}")
         raise
+    finally:
+        if response is not None:
+            response.close()
     

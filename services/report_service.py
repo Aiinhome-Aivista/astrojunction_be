@@ -3440,23 +3440,28 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
 
     story = []
 
-    profile = payload.get("profile") or {}
-    selected_horizon = (payload.get("selectedHorizon") or "All Horizons (0–25 Years)").strip()
-    raw_milestones = payload.get("roadmap") or payload.get("milestones") or []
-    is_all_horizons = "all" in selected_horizon.lower() or "complete" in selected_horizon.lower() or "25-year" in selected_horizon.lower()
+    def _normalize_tf(tf_str: str) -> str:
+        if not tf_str:
+            return "0-5 Years"
+        clean = str(tf_str).strip().lower().replace("–", "-").replace(" ", "")
+        if clean in ("0-5", "0-5years", "0-12months", "1-3years"):
+            return "0-5 Years"
+        if clean in ("0-10", "0-10years", "3-5years", "5-10years"):
+            return "0-10 Years"
+        if clean in ("0-15", "0-15years", "10-15years"):
+            return "0-15 Years"
+        if clean in ("0-20", "0-20years", "15-20years"):
+            return "0-20 Years"
+        if clean in ("0-25", "0-25years", "20-25years"):
+            return "0-25 Years"
+        return str(tf_str).strip()
 
-    if not is_all_horizons and selected_horizon:
-        milestones = [
-            m for m in raw_milestones 
-            if (m.get("timeframe") or "").strip() == selected_horizon or
-               (selected_horizon == "0-5 Years" and (m.get("timeframe") or "").strip() in ("0-12 Months", "1-3 Years", "0-5 Years")) or
-               (selected_horizon in ("0-10 Years", "5-10 Years") and (m.get("timeframe") or "").strip() in ("3-5 Years", "5-10 Years", "0-10 Years")) or
-               (selected_horizon in ("0-15 Years", "10-15 Years") and (m.get("timeframe") or "").strip() in ("10-15 Years", "0-15 Years"))
-        ]
-        if not milestones:
-            milestones = [m for m in raw_milestones if (m.get("timeframe") or "").strip() == selected_horizon] or raw_milestones
-    else:
-        milestones = raw_milestones
+    profile = payload.get("profile") or {}
+    selected_horizon = (payload.get("selectedHorizon") or "All Available Guidance").strip()
+    norm_selected = _normalize_tf(selected_horizon)
+    raw_milestones = payload.get("roadmap") or payload.get("milestones") or []
+    include_all = payload.get("includeAll", False)
+    is_all_horizons = include_all or "all" in selected_horizon.lower() or "complete" in selected_horizon.lower() or "available" in selected_horizon.lower() or "25-year" in selected_horizon.lower()
 
     chart_data = payload.get("chartData") or {}
     numerology = payload.get("numerology") or {}
@@ -3469,9 +3474,6 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
     asc_sign = chart_data.get("ascendant", {}).get("signName") or chart_data.get("ascendant", {}).get("signSanskrit") or "Vedic Lagna"
     moon_planet = next((p for p in chart_data.get("planets", []) if str(p.get("id", "")).lower() == "moon" or str(p.get("name", "")).lower() == "moon"), {})
     moon_sign = chart_data.get("moonSign") or moon_planet.get("signName") or "Chandra Rashi"
-    nakshatra = moon_planet.get("nakshatra") or "Vedic Nakshatra"
-    if moon_planet.get("pada"):
-        nakshatra += f" (Pada {moon_planet.get('pada')})"
 
     dasha_list = chart_data.get("dashas", []) or chart_data.get("dashaPeriods", [])
     current_dasha_obj = next((d for d in dasha_list if d.get("isCurrent")), {})
@@ -3482,10 +3484,121 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
     else:
         active_dasha = "Jupiter Mahadasha"
 
+    # Default fallback milestones if raw_milestones is empty
+    if not raw_milestones:
+        dasha_name = active_dasha.replace(" Mahadasha", "")
+        raw_milestones = [
+            {
+                "id": "ms-1",
+                "timeframe": "0-5 Years",
+                "category": "Career",
+                "title": "Strategic Role Transition & Leadership Visibility",
+                "guidance": f"Under the active {dasha_name} Mahadasha and {asc_sign} lagna, Jupiter transit over your 10th house stimulates executive authority and strategic visibility.",
+                "favorableTransits": f"Auspicious Jupiter transit trines your {asc_sign} Ascendant",
+                "remedialAction": "Chant Brihaspati Beej Mantra on Thursdays; donate yellow lentils.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-2",
+                "timeframe": "0-5 Years",
+                "category": "Wealth",
+                "title": "Diversified Asset Allocation & Real Estate Review",
+                "guidance": "Favorable aspect on 2nd and 11th houses indicates strong liquidity growth. Avoid speculative short-term gambling during Rahu Kaal periods.",
+                "favorableTransits": "Venus exalted in 11th house sub-period",
+                "remedialAction": "Offer water to rising Sun (Surya Arghya) with red sandalwood.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-3",
+                "timeframe": "0-5 Years",
+                "category": "Relationships",
+                "title": "Harmonious Bonding & Family Expansion",
+                "guidance": "Benefic aspects on the 5th and 7th houses foster mutual understanding, emotional closeness, and celebrations at home.",
+                "favorableTransits": "Jupiter aspecting Venus & 7th Lord",
+                "remedialAction": "Light a pure ghee lamp before Radha-Krishna on Fridays.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-4",
+                "timeframe": "0-5 Years",
+                "category": "Health",
+                "title": "Immunity Enhancement & Lifestyle Rhythm",
+                "guidance": "Align your circadian cycle with Ayurvedic Dinacharya principles. Morning Surya Namaskar preserves radiant vitality and mental clarity.",
+                "favorableTransits": "Sun-Mars trine vitality boost in Lagna",
+                "remedialAction": "Drink warm water from a copper vessel every morning.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-5",
+                "timeframe": "0-5 Years",
+                "category": "Spirituality",
+                "title": "Mantra Sadhana & Daily Spiritual Foundation",
+                "guidance": "Establishing regular meditation and Gayatri Japa awakens deep intuition, inner serenity, and karmic clarity.",
+                "favorableTransits": "Jupiter-Ketu auspicious 9th house connection",
+                "remedialAction": "Chant Gayatri Mantra 108 times at sunrise daily.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-6",
+                "timeframe": "0-5 Years",
+                "category": "Family",
+                "title": "Family Lineage Harmony & Domestic Stability",
+                "guidance": "Auspicious planetary aspects to the 2nd and 4th houses foster familial mutual respect, ancestral blessings, and peaceful living environment.",
+                "favorableTransits": "Moon-Jupiter benefic aspect on 4th house (Sukha Sthana)",
+                "remedialAction": "Perform Satyanarayan Puja with family on Purnima days.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-7",
+                "timeframe": "0-5 Years",
+                "category": "Education",
+                "title": "Skill Mastery & Higher Knowledge Attainment",
+                "guidance": "Mercury and Jupiter transits bless intellectual focus, competitive examination success, and acquisition of valuable vocational certifications.",
+                "favorableTransits": "Budhaditya Yoga alignment influencing the 5th house of intellect",
+                "remedialAction": "Recite Saraswati Vandana and offer green grass to cows on Wednesdays.",
+                "status": "In-Progress"
+            },
+            {
+                "id": "ms-8",
+                "timeframe": "0-5 Years",
+                "category": "Travel",
+                "title": "Favorable Relocation & Sacred Journeys",
+                "guidance": "Short and medium-distance travel windows open up for business expansion, professional assignments, and sacred Teertha yatras.",
+                "favorableTransits": "3rd and 9th Lord mutual aspect favoring travel safety and gains",
+                "remedialAction": "Chant Hanuman Chalisa before commencing journeys.",
+                "status": "In-Progress"
+            }
+        ]
+
+    # Normalize timeframes on all milestones
+    normalized_milestones = []
+    for m in raw_milestones:
+        if isinstance(m, dict):
+            m_copy = dict(m)
+            m_copy["timeframe"] = _normalize_tf(m.get("timeframe"))
+            normalized_milestones.append(m_copy)
+
+    if not is_all_horizons and selected_horizon and selected_horizon != "All Available Guidance":
+        milestones = [
+            m for m in normalized_milestones 
+            if _normalize_tf(m.get("timeframe")) == norm_selected
+        ]
+        if not milestones:
+            milestones = normalized_milestones
+    else:
+        milestones = normalized_milestones
+
+    nakshatra = moon_planet.get("nakshatra") or "Vedic Nakshatra"
+    if moon_planet.get("pada"):
+        nakshatra += f" (Pada {moon_planet.get('pada')})"
+
     mulank_val = f"Mulank {numerology.get('mulank')}" if numerology.get("mulank") else "Mulank -"
     bhagyank_val = f"Bhagyank {numerology.get('bhagyank')}" if numerology.get("bhagyank") else "Bhagyank -"
 
-    header_title = f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})" if not is_all_horizons else "VEDIC DESTINY ROADMAP & LIFE BLUEPRINT (0–25 YEARS)"
+    if is_all_horizons or "available" in selected_horizon.lower():
+        header_title = "VEDIC DESTINY ROADMAP & LIFE BLUEPRINT (ALL AVAILABLE GUIDANCE)"
+    else:
+        header_title = f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})"
 
     # 1. Header Title & Brand
     story.append(
@@ -3535,7 +3648,7 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
     # 3. Overview Arc Banner
     total_ms = len(unlocked_milestones)
     overview_sub = (
-        f"Coverage: <b>All Horizons</b> | Active Dimensions: <b>{total_ms}</b> | Comprehensive Kundli Synthesis"
+        f"Coverage: <b>All Available Horizons &amp; Life Spheres</b> | Total Predictions: <b>{total_ms}</b> | Comprehensive Kundli Synthesis"
         if is_all_horizons else
         f"Active Horizon: <b>{selected_horizon}</b> | Dimension Predictions: <b>{total_ms}</b> | Planetary Transit Synthesis"
     )
@@ -3593,10 +3706,11 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
             transits = m.get("favorableTransits") or "Favorable planetary aspect and Mahadasha support."
             remedy = m.get("remedialAction") or "Chant Gayatri Mantra & perform planetary seva."
 
+            tf_label = f" &nbsp;•&nbsp; <font size=7.5 color='#966C1E'><b>[{timeframe}]</b></font>" if timeframe else ""
             card_content = [
                 [
                     Paragraph(
-                        f"<font size=10 color='#1A1A1E'><b>{idx + 1}.  {title}</b></font><br/><br/>"
+                        f"<font size=10 color='#1A1A1E'><b>{idx + 1}.  {title}</b></font>{tf_label}<br/><br/>"
                         f"<font size=7 color='#7E5F18'><b>DASHA &amp; LIFE STRATEGY GUIDANCE</b></font><br/>"
                         f"<font size=7.8 color='#2A2A2E'>{guidance}</font><br/><br/>"
                         f"<font size=7 color='#966C1E'><b>ASTROLOGICAL WINDOW &amp; TRANSITS</b></font><br/>"
@@ -3618,7 +3732,8 @@ def generate_roadmap_report_pdf(payload: dict) -> bytes:
                 ("RIGHTPADDING", (0, 0), (-1, -1), 10),
             ]))
             story.append(card_table)
-            story.append(Spacer(1, 3.5 * mm))
+            if idx < len(unlocked_milestones) - 1:
+                story.append(Spacer(1, 2.5 * mm))
 
     # Page Decorations (Watermark, Golden Borders, Footers)
     def _draw_roadmap_decorations(canvas, doc_):
