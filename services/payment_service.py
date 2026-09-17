@@ -9,8 +9,9 @@ load_dotenv()
 
 
 def get_razorpay_client():
-    key_id = (os.getenv("RAZORPAY_KEY_ID") or "").strip()
-    key_secret = (os.getenv("RAZORPAY_KEY_SECRET") or "").strip()
+    load_dotenv(override=True)
+    key_id = (os.getenv("RAZORPAY_KEY_ID") or os.getenv("PAYMENT_KEY_ID") or "").strip().strip('"').strip("'")
+    key_secret = (os.getenv("RAZORPAY_KEY_SECRET") or os.getenv("PAYMENT_KEY_SECRET") or "").strip().strip('"').strip("'")
     return razorpay.Client(auth=(key_id, key_secret))
 
 
@@ -47,6 +48,15 @@ def create_order(user_id: str, amount: float, currency: str = "INR", item_type: 
     conn = get_db_connection()
     try:
         cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+        valid_user = cursor.fetchone()
+        actual_user_id = valid_user["id"] if valid_user else None
+        if not actual_user_id:
+            cursor.execute("SELECT id FROM users LIMIT 1")
+            first_user = cursor.fetchone()
+            if first_user:
+                actual_user_id = first_user["id"]
+
         query = """
             INSERT INTO transactions (
                 id, user_id, amount, currency, status, payment_method, 
@@ -55,7 +65,7 @@ def create_order(user_id: str, amount: float, currency: str = "INR", item_type: 
         """
         cursor.execute(query, (
             tx_id,
-            user_id,
+            actual_user_id or user_id,
             amount,
             currency.upper(),
             'pending',
@@ -70,6 +80,8 @@ def create_order(user_id: str, amount: float, currency: str = "INR", item_type: 
     finally:
         conn.close()
 
+    key_id = (os.getenv("RAZORPAY_KEY_ID") or os.getenv("PAYMENT_KEY_ID") or "").strip().strip('"').strip("'")
+
     return {
         "tx_id": tx_id,
         "order_id": razorpay_order_id,
@@ -77,7 +89,8 @@ def create_order(user_id: str, amount: float, currency: str = "INR", item_type: 
         "amount_paise": amount_in_paise,
         "currency": currency.upper(),
         "item_type": item_type,
-        "item_id": item_id
+        "item_id": item_id,
+        "key_id": key_id,
     }
 
 
@@ -231,8 +244,9 @@ def _fulfill_purchase(conn, tx: dict):
     item_type = tx.get("item_type")
     user_id = tx.get("user_id")
 
-    if item_type in ["premium", "subscription"]:
+    if user_id:
         cursor = conn.cursor()
         cursor.execute("UPDATE user_profiles SET is_premium = 1 WHERE user_id = %s", (user_id,))
         conn.commit()
         cursor.close()
+

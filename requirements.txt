@@ -9,6 +9,7 @@ reportlab==4.2.5
 geopy==2.5.0
 razorpay==1.4.1
 setuptools<70.0.0
-
+pyswisseph>=2.10.3.2        
+timezonefinder>=9.0.0
 
 
