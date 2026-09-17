@@ -1,8 +1,11 @@
 # AstroJunction Backend API Server
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-
 from database.db_connection import get_db_connection
+
 from controllers import auth_controller
 from controllers import profile_controller
 from controllers import numerology_controller
@@ -21,7 +24,9 @@ from controllers import knowledge_graph_controller
 from controllers import llm_generation_controller
 from controllers import full_report_controller
 from controllers import AI_response
+from controllers import payment_controller
 import jwt as pyjwt
+
 
 app = Flask(__name__)
 CORS(app)
@@ -489,8 +494,35 @@ def clear_ai_history():
     return AI_response.clear_chat_history()
 
 
+# ==========================================
+# 💳 RAZORPAY PAYMENT GATEWAY APIs
+# ==========================================
+
+@app.route("/api/payment/create-order", methods=["POST"])
+@require_auth
+def create_payment_order():
+    return payment_controller.create_order()
+
+
+@app.route("/api/payment/verify", methods=["POST"])
+@require_auth
+def verify_payment_signature():
+    return payment_controller.verify_payment()
+
+
+@app.route("/api/payment/webhook", methods=["POST"])
+def payment_webhook():
+    return payment_controller.webhook_callback()
+
+
+@app.route("/api/payment/history", methods=["GET"])
+@require_auth
+def get_payment_history():
+    return payment_controller.get_transactions()
+
 
 if __name__ == "__main__":
+
     # Fail fast if MySQL isn't reachable, rather than starting silently broken.
     conn = get_db_connection()
     conn.close()

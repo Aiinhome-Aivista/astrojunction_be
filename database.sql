@@ -146,11 +146,32 @@ CREATE TABLE IF NOT EXISTS transactions (
     user_id CHAR(36) NOT NULL,
     amount DECIMAL(10, 2) NOT NULL,
     currency VARCHAR(10) DEFAULT 'INR',
-    status ENUM('success', 'failed', 'pending') NOT NULL,
-    payment_method VARCHAR(50) NOT NULL,
+    status ENUM('success', 'failed', 'pending') NOT NULL DEFAULT 'pending',
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'razorpay',
+    razorpay_order_id VARCHAR(100) NULL,
+    razorpay_payment_id VARCHAR(100) NULL,
+    razorpay_signature VARCHAR(255) NULL,
+    item_type VARCHAR(50) NULL,
+    item_id VARCHAR(100) NULL,
+    raw_response JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_tx_user (user_id),
+    INDEX idx_tx_order (razorpay_order_id)
+) ENGINE=InnoDB;
+
+-- If table already exists in MySQL, execute the following query manually:
+-- ALTER TABLE transactions 
+--   ADD COLUMN razorpay_order_id VARCHAR(100) NULL AFTER payment_method,
+--   ADD COLUMN razorpay_payment_id VARCHAR(100) NULL AFTER razorpay_order_id,
+--   ADD COLUMN razorpay_signature VARCHAR(255) NULL AFTER razorpay_payment_id,
+--   ADD COLUMN item_type VARCHAR(50) NULL AFTER razorpay_signature,
+--   ADD COLUMN item_id VARCHAR(100) NULL AFTER item_type,
+--   ADD COLUMN raw_response JSON NULL AFTER item_id,
+--   ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at,
+--   ADD INDEX idx_tx_order (razorpay_order_id);
+
 
 -- ------------------------------------------------------------
 -- Consolidated Master Stored Procedures
