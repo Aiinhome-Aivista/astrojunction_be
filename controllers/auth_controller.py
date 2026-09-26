@@ -4,7 +4,7 @@ from flask import request, jsonify
 from mysql.connector import IntegrityError
 
 from geopy.geocoders import Nominatim
-from database.db_connection import call_procedure
+from database.db_connection import call_procedure, get_db_connection
 from utils.security import hash_password, verify_password, issue_token
 
 import json
@@ -293,4 +293,57 @@ def google_auth():
             },
         },
     }), 201
+
+
+def change_password():
+    user_id = getattr(request, "user_id", None)
+    user_role = getattr(request, "user_role", None)
+    if not user_id:
+        return _error("Authentication required", "AUTH_REQUIRED", 401)
+    if user_role != "admin":
+        return _error("Only administrators are permitted to change passwords", "FORBIDDEN", 403)
+
+    body = request.get_json(silent=True) or {}
+    current_password = (body.get("currentPassword") or body.get("current_password") or "").strip()
+    new_password = (body.get("newPassword") or body.get("new_password") or "").strip()
+
+    if not current_password or not new_password:
+        return _error("Both current password and new password are required", "MISSING_FIELDS", 400)
+
+    if len(new_password) < 6:
+        return _error("New password must be at least 6 characters long", "INVALID_PASSWORD", 400)
+
+    if current_password == new_password:
+        return _error("New password cannot be the same as your current password", "SAME_PASSWORD", 400)
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, email, password_hash FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            return _error("User account not found", "USER_NOT_FOUND", 404)
+
+        if not verify_password(current_password, user["password_hash"]):
+            return _error("Current password is incorrect", "INCORRECT_PASSWORD", 400)
+
+        new_hash = hash_password(new_password)
+        cursor.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user_id))
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Password changed successfully."
+        }), 200
+    except Exception as e:
+        print(f"[AUTH CHANGE PASSWORD ERROR] {e}")
+        return _error(f"Failed to change password: {str(e)}", "SERVER_ERROR", 500)
+    finally:
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
+
 

@@ -19,7 +19,7 @@ from controllers import calendar_controller
 from controllers import blogs_controller
 from controllers import landing_chat_controller
 from controllers import admin_controller
-from utils.security import require_auth, decode_token
+from utils.security import require_auth, require_admin, decode_token
 from controllers import knowledge_graph_controller
 from controllers import llm_generation_controller
 from controllers import full_report_controller
@@ -158,6 +158,15 @@ def google_auth():
 @require_auth
 def me():
     return auth_controller.me(request.user_id)
+
+
+@app.route("/auth/change-password", methods=["POST"])
+@app.route("/api/auth/change-password", methods=["POST"])
+@require_auth
+@require_admin
+def change_password():
+    return auth_controller.change_password()
+
 
 
 # ---------------- Profiles (require login) ----------------
