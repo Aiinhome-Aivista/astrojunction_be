@@ -429,6 +429,17 @@ def update_llm_config():
 def test_llm_connection():
     return admin_controller.test_llm_connection()
 
+@app.route("/api/admin/seo-config", methods=["GET"])
+@app.route("/api/seo-config", methods=["GET"])
+def get_seo_config():
+    return admin_controller.get_seo_config()
+
+@app.route("/api/admin/seo-config", methods=["PUT", "POST"])
+# @require_auth
+def update_seo_config():
+    return admin_controller.update_seo_config()
+
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Global error handler to catch exceptions and log them."""

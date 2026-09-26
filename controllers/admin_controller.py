@@ -157,4 +157,40 @@ def test_llm_connection():
                 "latency_ms": 0,
             }
         }), 200
+
+
+def get_seo_config():
+    import json
+    from services.settings_service import get_setting
+    try:
+        raw = get_setting("seo_config", "")
+        if raw:
+            try:
+                data = json.loads(raw)
+                return jsonify({"status": "success", "data": data}), 200
+            except Exception:
+                pass
+        return jsonify({"status": "success", "data": {}}), 200
+    except Exception as e:
+        print(f"Error fetching SEO config: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def update_seo_config():
+    import json
+    from flask import request
+    from services.settings_service import set_setting
+    try:
+        payload = request.get_json(silent=True) or {}
+        json_str = json.dumps(payload)
+        set_setting("seo_config", json_str, updated_by="admin", description="Dynamic SEO and Meta Tags")
+        return jsonify({
+            "status": "success",
+            "message": "SEO configuration updated successfully",
+            "data": payload
+        }), 200
+    except Exception as e:
+        print(f"Error updating SEO config: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
         
