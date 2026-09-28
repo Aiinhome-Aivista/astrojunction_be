@@ -48,10 +48,10 @@ Do NOT output plain text. DO NOT use custom keys like 'planet' or 'sign'. YOU MU
 def generate_facts_from_topic(topic):
     """শুধুমাত্র LLM-এর নিজস্ব জ্ঞান থেকে ডাটা আনার ফাংশন"""
     llm_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
-    model_name = get_setting("MISTRAL_MODEL", "mistral:latest")
+    model_name = get_setting("MISTRAL_MODEL", "")
     
-    if not llm_url:
-        print("[LLMExtractor] MISTRAL_LOCAL_URL is not configured in Admin Settings.")
+    if not llm_url or not model_name:
+        print("[LLMExtractor] MISTRAL_LOCAL_URL or MISTRAL_MODEL is not configured in Admin Settings.")
         return {"facts": []}
 
     api_endpoint = f"{llm_url}/v1/chat/completions"

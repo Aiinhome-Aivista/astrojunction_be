@@ -38,6 +38,36 @@ def init_settings_table():
         if conn and conn.is_connected():
             conn.close()
 
+def init_llm_config_table():
+    """Ensures the llm_configurations table exists in MySQL."""
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS llm_configurations (
+                provider VARCHAR(100) PRIMARY KEY,
+                is_active BOOLEAN DEFAULT FALSE,
+                llm_model VARCHAR(255) NULL,
+                api_url VARCHAR(500) NULL,
+                api_key VARCHAR(500) NULL,
+                timeout_seconds INT DEFAULT 30,
+                updated_by VARCHAR(100) DEFAULT 'admin',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[SettingsService] Warning: Could not initialize llm_configurations table: {e}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
+
 
 def load_all_settings(force: bool = False):
     """Loads all settings in ONE single query to avoid multiple remote DB roundtrips."""
@@ -68,6 +98,7 @@ def load_all_settings(force: bool = False):
 # Initialize table & warm up settings cache on import
 try:
     init_settings_table()
+    init_llm_config_table()
     load_all_settings(force=True)
 except Exception:
     pass
@@ -198,6 +229,10 @@ def get_llm_config() -> Dict[str, Any]:
     openai_model = get_setting("OPENAI_MODEL", "gpt-4o-mini")
     openai_base_url = get_setting("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
+    openrouter_api_key = get_setting("OPENROUTER_API_KEY", "")
+    openrouter_model = get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+    openrouter_base_url = get_setting("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
     # High-Availability & Tuning parameters
     enable_failover = get_setting("ENABLE_AUTO_FAILOVER", "true")
     fallback_llm = get_setting("FALLBACK_LLM", "gemini")
@@ -217,6 +252,9 @@ def get_llm_config() -> Dict[str, Any]:
         "OPENAI_API_KEY": mask_key(openai_api_key),
         "OPENAI_MODEL": openai_model,
         "OPENAI_BASE_URL": openai_base_url,
+        "OPENROUTER_API_KEY": mask_key(openrouter_api_key),
+        "OPENROUTER_MODEL": openrouter_model,
+        "OPENROUTER_BASE_URL": openrouter_base_url,
         "ENABLE_AUTO_FAILOVER": enable_failover,
         "FALLBACK_LLM": fallback_llm,
         "LLM_TIMEOUT": llm_timeout,
@@ -227,6 +265,7 @@ def get_llm_config() -> Dict[str, Any]:
             "gemini": bool(gemini_api_key and gemini_api_key.strip()),
             "mistral_cloud": bool(mistral_cloud_key and mistral_cloud_key.strip()),
             "openai": bool(openai_api_key and openai_api_key.strip()),
+            "openrouter": bool(openrouter_api_key and openrouter_api_key.strip()),
         },
         # Nested format for backward compatibility:
         "active_llm": active_llm,
@@ -251,7 +290,13 @@ def get_llm_config() -> Dict[str, Any]:
             "is_configured": bool(openai_api_key),
             "masked_key": mask_key(openai_api_key),
         },
-        "available_providers": ["mistral_local", "gemini", "mistral_cloud", "openai"],
+        "openrouter": {
+            "base_url": openrouter_base_url,
+            "model": openrouter_model,
+            "is_configured": bool(openrouter_api_key),
+            "masked_key": mask_key(openrouter_api_key),
+        },
+        "available_providers": ["mistral_local", "gemini", "mistral_cloud", "openai", "openrouter"],
     }
 
 
@@ -294,6 +339,17 @@ def update_llm_config(data: Dict[str, Any], updated_by: str = "admin") -> bool:
     if oa_base:
         settings_to_save["OPENAI_BASE_URL"] = str(oa_base).strip()
 
+    # OpenRouter
+    or_key = data.get("OPENROUTER_API_KEY") or data.get("openrouter_api_key")
+    if or_key and not or_key.startswith("***") and "..." not in or_key:
+        settings_to_save["OPENROUTER_API_KEY"] = str(or_key).strip()
+    or_model = data.get("OPENROUTER_MODEL") or data.get("openrouter_model")
+    if or_model:
+        settings_to_save["OPENROUTER_MODEL"] = str(or_model).strip()
+    or_base = data.get("OPENROUTER_BASE_URL") or data.get("openrouter_base_url")
+    if or_base:
+        settings_to_save["OPENROUTER_BASE_URL"] = str(or_base).strip()
+
     # Failover & Runtime parameters
     if "ENABLE_AUTO_FAILOVER" in data:
         val = "true" if str(data["ENABLE_AUTO_FAILOVER"]).lower() in ("true", "1", "yes") else "false"
@@ -321,6 +377,10 @@ def update_llm_config(data: Dict[str, Any], updated_by: str = "admin") -> bool:
             current_key = settings_to_save.get("OPENAI_API_KEY") or get_setting("OPENAI_API_KEY", "")
             if not current_key or not current_key.strip():
                 raise ValueError("OpenAI cannot be activated without an API Key. Please enter a valid OpenAI API Key first.")
+        elif provider == "openrouter":
+            current_key = settings_to_save.get("OPENROUTER_API_KEY") or get_setting("OPENROUTER_API_KEY", "")
+            if not current_key or not current_key.strip():
+                raise ValueError("OpenRouter cannot be activated without an API Key. Please enter a valid OpenRouter API Key first.")
         elif provider == "mistral_cloud":
             current_key = settings_to_save.get("MISTRAL_CLOUD_API_KEY") or get_setting("MISTRAL_CLOUD_API_KEY", "")
             if not current_key or not current_key.strip():
@@ -332,22 +392,62 @@ def update_llm_config(data: Dict[str, Any], updated_by: str = "admin") -> bool:
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
-        # If the provider is actively changing, perform a rapid live ping test
-        if provider != current_active:
-            test_res = test_llm_connection(provider, config=data, timeout=(2.5, 3.5))
-            if not test_res.get("success"):
-                err_msg = test_res.get("message", "Authentication check failed.")
-                raise ValueError(f"Verification Failed: {err_msg}")
-
         settings_to_save["ACTIVE_LLM"] = provider
 
     # Perform ONE single bulk update to save all settings instantly
-    return set_settings_bulk(settings_to_save, updated_by=updated_by)
+    success = set_settings_bulk(settings_to_save, updated_by=updated_by)
+    if success:
+        sync_llm_configurations_table(updated_by)
+    return success
+
+
+def sync_llm_configurations_table(updated_by: str = "admin"):
+    """Syncs the flat key-value settings into the structured llm_configurations table for database clarity."""
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        active_llm = get_setting("ACTIVE_LLM", "")
+        timeout_seconds = int(get_setting("LLM_TIMEOUT", "30"))
+        
+        providers = {
+            "mistral_local": (get_setting("MISTRAL_MODEL", ""), get_setting("MISTRAL_LOCAL_URL", ""), ""),
+            "gemini": (get_setting("GEMINI_MODEL", ""), "", get_setting("GEMINI_API_KEY", "")),
+            "mistral_cloud": (get_setting("MISTRAL_MODEL", ""), get_setting("MISTRAL_CLOUD_URL", ""), get_setting("MISTRAL_CLOUD_API_KEY", "")),
+            "openai": (get_setting("OPENAI_MODEL", ""), get_setting("OPENAI_BASE_URL", ""), get_setting("OPENAI_API_KEY", "")),
+            "openrouter": (get_setting("OPENROUTER_MODEL", ""), get_setting("OPENROUTER_BASE_URL", ""), get_setting("OPENROUTER_API_KEY", "")),
+        }
+
+        query = """
+            INSERT INTO llm_configurations (provider, is_active, llm_model, api_url, api_key, timeout_seconds, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                is_active = VALUES(is_active),
+                llm_model = VALUES(llm_model),
+                api_url = VALUES(api_url),
+                api_key = VALUES(api_key),
+                timeout_seconds = VALUES(timeout_seconds),
+                updated_by = VALUES(updated_by)
+        """
+        for prov, (mod, url, key) in providers.items():
+            is_active = (active_llm == prov)
+            cursor.execute(query, (prov, is_active, mod, url, key, timeout_seconds, updated_by))
+        
+        conn.commit()
+    except Exception as e:
+        print(f"[SettingsService] Error syncing llm_configurations table: {e}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
 
 
 def test_all_providers() -> Dict[str, Any]:
     """Runs concurrent health checks on all supported LLM providers."""
-    providers = ["mistral_local", "gemini", "mistral_cloud", "openai"]
+    providers = ["mistral_local", "gemini", "mistral_cloud", "openai", "openrouter"]
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         future_to_prov = {executor.submit(test_llm_connection, p, None, (2.5, 3.5)): p for p in providers}
@@ -561,6 +661,56 @@ def test_llm_connection(
             except Exception:
                 clean_msg = resp.text[:150]
             return {"success": False, "latency_ms": latency, "message": f"OpenAI API key invalid ({resp.status_code}): {clean_msg}"}
+
+        elif provider == "openrouter":
+            base_url = (
+                config.get("OPENROUTER_BASE_URL")
+                or config.get("base_url")
+                or get_setting("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+            ).rstrip("/")
+            api_key = (
+                config.get("OPENROUTER_API_KEY")
+                or config.get("api_key")
+                or get_setting("OPENROUTER_API_KEY", "")
+            )
+            model = (
+                config.get("OPENROUTER_MODEL")
+                or config.get("model")
+                or get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+            )
+            if not api_key or api_key.startswith("***") or "..." in api_key:
+                api_key = get_setting("OPENROUTER_API_KEY", "")
+            if not api_key:
+                return {"success": False, "message": "OpenRouter API key is required"}
+
+            print(f"\n{'='*60}")
+            print(f"[LLM TEST CALL] Provider: openrouter | Model/Version: {model} | URL: {base_url}/chat/completions")
+            print(f"{'='*60}\n")
+            resp = requests.post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "https://astrojunction.com",
+                    "X-Title": "AstroJunction",
+                    "Connection": "close",
+                },
+                json={"model": model, "messages": [{"role": "user", "content": test_prompt}]},
+                timeout=timeout,
+            )
+            latency = int((time.time() - start_time) * 1000)
+            if resp.status_code == 200:
+                try:
+                    resolved_model = resp.json().get("model", model)
+                except Exception:
+                    resolved_model = model
+                print(f"[LLM TEST RESPONSE] Provider: openrouter | Resolved Model/Version: {resolved_model}")
+                return {"success": True, "latency_ms": latency, "message": f"Connected to OpenRouter ({model}) successfully ({latency}ms)"}
+            try:
+                err_data = resp.json()
+                clean_msg = err_data.get("error", {}).get("message") or resp.text[:150]
+            except Exception:
+                clean_msg = resp.text[:150]
+            return {"success": False, "latency_ms": latency, "message": f"OpenRouter API key invalid ({resp.status_code}): {clean_msg}"}
 
         else:
             return {"success": False, "message": f"Unknown provider: {provider}"}

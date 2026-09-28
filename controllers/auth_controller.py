@@ -134,6 +134,17 @@ def register():
     except Exception as prof_err:
         print(f"[REGISTER WARNING] Could not auto-create profile: {prof_err}")
 
+    # Instigate Registration Confirmation Email
+    try:
+        from services.email_service import send_registration_confirmation_email
+        send_registration_confirmation_email(
+            email=email,
+            full_name=full_name,
+            birth_date=birth_date
+        )
+    except Exception as email_err:
+        print(f"[AUTH EMAIL WARNING] Could not dispatch registration confirmation email: {email_err}")
+
     return jsonify({
         "status": "success",
         "message": "User registered and primary profile created successfully",

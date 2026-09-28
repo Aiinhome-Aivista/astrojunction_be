@@ -59,6 +59,9 @@ def daily_horoscope():
             })
 
     try:
+        from services.settings_service import get_setting
+        active_engine = get_setting("ACTIVE_LLM", "not_set")
+        print(f"\n[DailyHoroscope API] Generating insights for: '{profile.get('fullName', 'User')}' | Provider in use: [{active_engine.upper()}]")
         json_res = get_daily_insights_response(profile, chart_data, panchang, numerology)
         insights = json.loads(json_res)
         with _cache_lock:

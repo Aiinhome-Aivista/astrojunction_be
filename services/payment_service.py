@@ -239,14 +239,40 @@ def get_user_transactions(user_id: str):
 def _fulfill_purchase(conn, tx: dict):
     """
     Helper function to fulfill service when payment succeeds.
-    e.g. Setting is_premium = 1 on user's profile.
+    Sets is_premium = 1 on user's profile and instigates subscription confirmation email.
     """
-    item_type = tx.get("item_type")
     user_id = tx.get("user_id")
+    item_id = tx.get("item_id") or "AstroJunction Premium"
 
     if user_id:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE user_profiles SET is_premium = 1 WHERE user_id = %s", (user_id,))
-        conn.commit()
-        cursor.close()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("UPDATE user_profiles SET is_premium = 1 WHERE user_id = %s", (user_id,))
+            conn.commit()
+
+            # Retrieve user email and name for subscription confirmation email
+            cursor.execute("SELECT email, full_name FROM users WHERE id = %s", (user_id,))
+            user_row = cursor.fetchone()
+
+            if user_row and user_row.get("email"):
+                from services.email_service import send_subscription_confirmation_email
+                plan_name = item_id.replace("_", " ").title() if item_id else "AstroJunction Premium"
+                amount = float(tx.get("amount") or 0.0)
+                currency = str(tx.get("currency") or "INR")
+                order_id = str(tx.get("razorpay_order_id") or "N/A")
+                payment_id = str(tx.get("razorpay_payment_id") or "N/A")
+
+                send_subscription_confirmation_email(
+                    email=user_row["email"],
+                    full_name=user_row.get("full_name") or "User",
+                    plan_name=plan_name,
+                    amount=amount,
+                    currency=currency,
+                    order_id=order_id,
+                    payment_id=payment_id
+                )
+        except Exception as e:
+            print(f"[FULFILLMENT / EMAIL WARNING] {e}")
+        finally:
+            cursor.close()
 

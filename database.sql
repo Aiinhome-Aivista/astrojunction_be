@@ -141,6 +141,19 @@ CREATE TABLE IF NOT EXISTS system_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS subscription_plans (
+    id VARCHAR(50) PRIMARY KEY,
+    plan_name VARCHAR(150) NOT NULL,
+    plan_type VARCHAR(50) NOT NULL,
+    price_inr DECIMAL(10, 2) NOT NULL,
+    price_usd DECIMAL(10, 2) NULL,
+    description TEXT,
+    features_json JSON NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS transactions (
     id CHAR(36) PRIMARY KEY,
     user_id CHAR(36) NOT NULL,
@@ -382,6 +395,41 @@ CREATE PROCEDURE IF NOT EXISTS sp_add_system_log(
 BEGIN
     INSERT INTO system_logs (id, level, message, module) VALUES (p_id, p_level, p_message, p_module);
 END //
+
+CREATE PROCEDURE IF NOT EXISTS sp_subscription_ops(
+    IN p_action VARCHAR(20),
+    IN p_id VARCHAR(50),
+    IN p_plan_name VARCHAR(150),
+    IN p_plan_type VARCHAR(50),
+    IN p_price_inr DECIMAL(10, 2),
+    IN p_price_usd DECIMAL(10, 2),
+    IN p_description TEXT,
+    IN p_features_json JSON,
+    IN p_is_active TINYINT(1)
+)
+BEGIN
+    IF p_action = 'create' OR p_action = 'update' THEN
+        INSERT INTO subscription_plans (id, plan_name, plan_type, price_inr, price_usd, description, features_json, is_active)
+        VALUES (p_id, p_plan_name, p_plan_type, p_price_inr, p_price_usd, p_description, p_features_json, p_is_active)
+        ON DUPLICATE KEY UPDATE
+            plan_name = VALUES(plan_name),
+            plan_type = VALUES(plan_type),
+            price_inr = VALUES(price_inr),
+            price_usd = VALUES(price_usd),
+            description = VALUES(description),
+            features_json = VALUES(features_json),
+            is_active = VALUES(is_active);
+    ELSEIF p_action = 'get_all' THEN
+        SELECT * FROM subscription_plans ORDER BY created_at DESC;
+    ELSEIF p_action = 'get_active' THEN
+        SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY created_at DESC;
+    ELSEIF p_action = 'get_one' THEN
+        SELECT * FROM subscription_plans WHERE id = p_id;
+    ELSEIF p_action = 'delete' THEN
+        DELETE FROM subscription_plans WHERE id = p_id;
+    END IF;
+END //
+
 DELIMITER ;
 
 

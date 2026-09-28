@@ -129,25 +129,26 @@ def post_filtered_roadmap_predictions():
     clean_horizon = raw_horizon.lower().replace(" ", "").replace("years", "")
     
     horizon_map = {
+        "0-1": "0-1 Year",
         "0-5": "0-5 Years",
         "0-10": "0-10 Years",
         "0-15": "0-15 Years",
         "0-20": "0-20 Years",
         "0-25": "0-25 Years"
-        
     }
     filter_map = {
+        "0-1": "0-1",
         "0-5": "0-5",
         "0-10": "0-10",
         "0-15": "0-15",
         "0-20": "0-20",
         "0-25": "0-25"
     }
-    selected_horizon = horizon_map.get(clean_horizon, horizon_map.get(raw_horizon, "0-5 Years"))
-    filter_value = filter_map.get(clean_horizon, "0-5")
-    allowed_horizons = ["0-5 Years", "0-10 Years", "0-15 Years", "0-20 Years", "0-25 Years"]
+    selected_horizon = horizon_map.get(clean_horizon, horizon_map.get(raw_horizon, "0-1 Year"))
+    filter_value = filter_map.get(clean_horizon, "0-1")
+    allowed_horizons = ["0-1 Year", "0-5 Years", "0-10 Years", "0-15 Years", "0-20 Years", "0-25 Years"]
     if selected_horizon not in allowed_horizons:
-        selected_horizon = "0-5 Years"
+        selected_horizon = "0-1 Year"
 
     chart_data = body.get("chartData", {})
     numerology = body.get("numerology", {})

@@ -58,10 +58,10 @@ def _get_llm_timeout() -> int:
 
 def _call_mistral_local(system_prompt: str, history: list) -> str:
     base_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
-    model = get_setting("MISTRAL_MODEL", "mistral:latest")
-    if not base_url:
+    model = get_setting("MISTRAL_MODEL", "")
+    if not base_url or not model:
         raise LLMError(
-            "ACTIVE_LLM is set to mistral_local but MISTRAL_LOCAL_URL is not configured in Admin Settings."
+            "ACTIVE_LLM is set to mistral_local but MISTRAL_LOCAL_URL or MISTRAL_MODEL is not configured in Admin Settings."
         )
 
     print(f"\n{'='*60}")
@@ -244,35 +244,89 @@ def _call_openai(system_prompt: str, history: list) -> str:
             resp.close()
 
 
-def _execute_llm(system_prompt: str, history: list) -> str:
-    active_llm = get_setting("ACTIVE_LLM", "mistral_local")
-    failover_enabled = get_setting("ENABLE_AUTO_FAILOVER", "true").lower() in ("true", "1", "yes")
-    fallback_llm = get_setting("FALLBACK_LLM", "gemini")
+def _call_openrouter(system_prompt: str, history: list) -> str:
+    api_key = get_setting("OPENROUTER_API_KEY", "")
+    base_url = get_setting("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    model = get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+    if not api_key:
+        raise LLMError("ACTIVE_LLM is set to openrouter but OPENROUTER_API_KEY is not configured.")
 
-    providers = [active_llm]
-    if failover_enabled and fallback_llm and fallback_llm != active_llm:
-        providers.append(fallback_llm)
+    print(f"\n{'='*60}")
+    print(f"[LLM CALL] Provider: openrouter | Model/Version: {model} | URL: {base_url}/chat/completions")
+    print(f"{'='*60}\n")
 
-    print(f"[LLMService] Executing LLM request | Active: '{active_llm}' | Failover: {'Enabled (Fallback: ' + fallback_llm + ')' if failover_enabled else 'Disabled'} | Providers: {providers}")
+    timeout = _get_llm_timeout()
+    messages = [{"role": "system", "content": system_prompt}] + history
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://astrojunction.com",
+        "X-Title": "AstroJunction",
+        "Connection": "close",
+    }
+    resp = None
+    try:
+        resp = requests.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json={"model": model, "messages": messages},
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            raise LLMError(f"OpenRouter returned HTTP {resp.status_code}: {resp.text[:300]}")
 
-    last_error = None
-    for prov in providers:
+        data = resp.json()
+        returned_model = data.get("model", model)
+        print(f"[LLM RESPONSE] Provider: openrouter | Resolved Model/Version: {returned_model}")
         try:
-            if prov == "mistral_local":
-                return _call_mistral_local(system_prompt, history)
-            elif prov == "mistral_cloud":
-                return _call_mistral_cloud(system_prompt, history)
-            elif prov == "gemini":
-                return _call_gemini(system_prompt, history)
-            elif prov == "openai":
-                return _call_openai(system_prompt, history)
-            else:
-                raise LLMError(f"Unknown LLM provider: '{prov}'")
-        except Exception as e:
-            last_error = e
-            print(f"[LLMService] Provider '{prov}' encountered error: {e}. Trying fallback if available...")
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise LLMError("OpenRouter returned an unexpected response shape.")
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach OpenRouter endpoint: {e}")
+    finally:
+        if resp is not None:
+            resp.close()
 
-    raise last_error or LLMError("All configured LLM engines failed.")
+
+def _execute_llm(system_prompt: str, history: list) -> str:
+    # Strictly execute ONLY the admin-configured active LLM. Zero fallback, zero hardcoded secondary engines.
+    active_llm = get_setting("ACTIVE_LLM", "").strip().lower()
+    if not active_llm:
+        raise LLMError("No active LLM engine is selected in Admin Settings. Please select and configure an AI Engine in Admin Panel.")
+
+    # Get the specific configured model name for clear visibility
+    model_name = "default"
+    if active_llm == "gemini":
+        model_name = get_setting("GEMINI_MODEL", "gemini-2.0-flash")
+    elif active_llm == "openrouter":
+        model_name = get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+    elif active_llm == "openai":
+        model_name = get_setting("OPENAI_MODEL", "gpt-4o-mini")
+    elif active_llm == "mistral_cloud":
+        model_name = get_setting("MISTRAL_MODEL", "mistral-large-latest")
+    elif active_llm == "mistral_local":
+        model_name = get_setting("MISTRAL_MODEL", "")
+        if not model_name:
+            raise LLMError("ACTIVE_LLM is set to mistral_local but MISTRAL_MODEL is not configured in Admin Settings.")
+
+    print("\n" + "=" * 65)
+    print(f"🤖 [LLM CALL TRIGGERED] Active Provider: >>> {active_llm.upper()} <<<")
+    print(f"📦 [LLM MODEL]           Model Name:      >>> {model_name} <<<")
+    print(f"🛡️  [FAILOVER STATUS]    Fallback:        >>> NONE (Strict Single Engine) <<<")
+    print("=" * 65 + "\n")
+
+    if active_llm == "mistral_local":
+        return _call_mistral_local(system_prompt, history)
+    elif active_llm == "mistral_cloud":
+        return _call_mistral_cloud(system_prompt, history)
+    elif active_llm == "gemini":
+        return _call_gemini(system_prompt, history)
+    elif active_llm == "openai":
+        return _call_openai(system_prompt, history)
+    elif active_llm == "openrouter":
+        return _call_openrouter(system_prompt, history)
+    else:
+        raise LLMError(f"Unknown or unconfigured LLM provider: '{active_llm}'")
 
 
 def get_ai_response(
@@ -706,45 +760,93 @@ def get_interpret_response(
         if sub_list:
             antar_dasha = sub_list[0].get("planet", "Unknown")
     
-    def fetch_part(system_prompt):
-        history = [{"role": "user", "content": f"Analyze my chart using {tradition}."}]
-        res = _execute_llm(system_prompt, history)
-        return res.strip()
+    planets = chart_data.get("planets", [])
+    moon_p = next((p for p in planets if (p.get("name") or "").lower() == "moon" or (p.get("id") or "").lower() == "moon"), None)
+    sun_p = next((p for p in planets if (p.get("name") or "").lower() == "sun" or (p.get("id") or "").lower() == "sun"), None)
+    moon_sign = moon_p.get("signName", "Moon Sign") if moon_p else "Moon Sign"
+    moon_nak = moon_p.get("nakshatra", "Chandra Nakshatra") if moon_p else "Chandra Nakshatra"
+
+    houses = chart_data.get("houses", [])
+    h10 = next((h for h in houses if h.get("houseNumber") == 10), {})
+    h2 = next((h for h in houses if h.get("houseNumber") == 2), {})
+    h11 = next((h for h in houses if h.get("houseNumber") == 11), {})
+
+    h10_sign = h10.get("signName", "Capricorn")
+    h10_lord = h10.get("signLord", "Saturn")
+    h2_sign = h2.get("signName", "Taurus")
+    h2_lord = h2.get("signLord", "Venus")
+    h11_sign = h11.get("signName", "Aquarius")
+    h11_lord = h11.get("signLord", "Saturn")
+
+    yogas_list = chart_data.get("yogas", [])
+    active_yogas = [y for y in yogas_list if y.get("name")]
+    yoga_name1 = active_yogas[0].get("name") if len(active_yogas) > 0 else "Raja Yoga & Dharma Adhipati"
+    yoga_desc1 = active_yogas[0].get("effect") or active_yogas[0].get("description") or "Elevates social standing, leadership authority, and moral resilience in professional pursuits." if len(active_yogas) > 0 else "Conjunction of Kendra and Trikona lords grants executive authority, lasting prestige, and ethical advancement."
     
-    lang_inst = "All text MUST be 100% in English only. Do NOT output any translations, parenthetical scripts, or other languages."
-    if language == 'bn':
-        lang_inst = "All text MUST be written in fluent, authentic Bengali script."
-    elif language and language != 'en':
-        lang_inst = f"All text MUST be in language code: {language}."
+    yoga_name2 = active_yogas[1].get("name") if len(active_yogas) > 1 else "Dhana Yoga & Lakshmi Sthana Harmony"
+    yoga_desc2 = active_yogas[1].get("effect") or active_yogas[1].get("description") or "Promotes steady wealth accumulation, entrepreneurial acumen, and financial stability." if len(active_yogas) > 1 else "Auspicious alignments between the 2nd, 5th, 9th, and 11th houses establish sustained material prosperity."
 
-    prompt1 = f"""You are AstroJunction Daivajna, an authentic, revered Vedic Astrologer providing personalized, enlightened astrological counsel for a seeker.
-Deliver a deeply insightful and personalized Vedic astrological interpretation in English. Write warmly and authoritatively like a revered Guru or Daivajna, NOT like a generic chatbot or machine.
+    tradition_titles = {
+        "parashari": "Parashari Jyotish (Brihat Parashara Hora Shastra)",
+        "jaimini": "Jaimini Sutras (Chara Karaka & Sign Aspects)",
+        "lal_kitab": "Lal Kitab (Planetary Debts & Practical Upayas)",
+        "kp_system": "KP System (Krishnamurti Padhdhati Sub-Lords)",
+        "bhrigu_nadi": "Bhrigu Nadi (Nandi Nadi Planetary Combinations)",
+    }
+    trad_title = tradition_titles.get(tradition.lower(), f"{tradition.upper()} Tradition")
 
-Seeker Details: Name: {profile_name}, Lagna (Ascendant): {lagna_rashi} ({lagna_nak})
+    def generate_full_5_card_synthesis():
+        if language == "bn":
+            return f"""### Cosmic Synthesis & Lagna Archetype
+- **লগ্নের আত্মিক শক্তি ({lagna_rashi} Lagna)**: আপনার লগ্ন {lagna_rashi} আপনার শারীরিক জীবনীশক্তি, মানসিক দৃঢ়তা এবং ব্যক্তিত্বের মূল কাঠামো নির্দেশ করে। এটি আপনার কর্মশক্তি এবং জীবনের লক্ষ্য অর্জনে ধারাবাহিক একাগ্রতা প্রদান করে।
+- **জন্ম নক্ষত্রের প্রভাব ({lagna_nak})**: {lagna_nak} নক্ষত্রের শাসনে আপনার মনস্তাত্ত্বিক উপলব্ধি এবং গভীর অন্তর্দৃষ্টি বিকশিত হয়, যা গুরুত্বপূর্ণ সিদ্ধান্ত গ্রহণে দূরদর্শিতা ও নেতৃত্ব দান করে।
+- **লগ্নপতির আত্মিক দিকদর্শন**: আপনার লগ্নপতির অনুকূল প্রভাব জীবনশক্তিকে গভীর বৌদ্ধিক চেতনা, কর্মনিষ্ঠা এবং সমাজে নিজস্ব অবস্থান মজবুত করার দিকে পরিচালিত করে।
 
-Instructions:
-1. Begin with a clean heading:
-### Cosmic Synthesis & Lagna Archetype
-2. Present a synthesis of how their Ascendant ({lagna_rashi}) and Nakshatra ({lagna_nak}) shape their core soul vitality and dharma.
-3. Provide 3-4 distinct archetypal dimensions as bullet points with bold titles (for example: - **Communication Mastery**: explanation...).
-4. Do NOT output raw hashtags like ### at random places or multiple stars. Keep the text clean, respectful, and eloquent.
-5. {lang_inst}
-"""
+### Bhava Alignments & House Lord Dynamics
+- **কর্মস্থান ও পেশাগত প্রতিষ্ঠা (দশম ভাব - {h10_sign})**: {h10_sign} রাশিতে অবস্থানরত দশম ভাব এবং এর অধিপতি {h10_lord}-এর প্রভাবে আপনার কর্মজীবনে প্রশাসনিক দক্ষতা, নেতৃত্ব ও দীর্ঘমেয়াদী প্রতিষ্ঠা অর্জনের শক্তিশালী যোগ রয়েছে।
+- **ধন ও লাভ সমৃদ্ধি প্রবাহ (দ্বিতীয় ও একাদশ ভাব - {h2_sign} ও {h11_sign})**: ধনভাব ({h2_sign}) এবং লাভভাব ({h11_sign})-এর যৌথ গতিশীলতা আর্থিক নিরাপত্তা, সুশৃঙ্খল সঞ্চয় এবং সফল বিনিয়োগের অনুকূল ভিত্তি তৈরি করে।
+- **কেন্দ্র ও ত্রিকোণ সামঞ্জস্য**: কেন্দ্র ও ত্রিকোণ ভাবগুলির অন্তর্নিহিত ভারসাম্য আপনার সার্বিক জীবনে স্থায়িত্ব প্রদান করে এবং সাময়িক অস্থিরতা থেকে রক্ষা করে।
 
-    prompt2 = f"""You are AstroJunction Daivajna, an authentic, revered Vedic Astrologer specializing in the {tradition.upper()} tradition.
-Deliver an authoritative, personalized timeline analysis of the seeker's active planetary cycles in English. Write warmly and authoritatively like a revered Guru or Daivajna, NOT like a generic chatbot.
+### Tradition-Specific Deep Dive ({trad_title})
+- **শাস্ত্রীয় সূত্র বিশ্লেষণ**: {trad_title}-এর শাস্ত্রীয় নিয়ম অনুযায়ী আপনার কুষ্ঠির বিশেষ গ্রহ সংযোগগুলি প্রতিকূলতাকে সম্ভাবনায় রূপান্তর করার শক্তিশালী সংকেত বহন করে।
+- **বর্তমান মহাদশা ({maha_dasha}) রূপান্তর**: সক্রিয় {maha_dasha} মহাদশা আপনার জীবনে একটি গভীর আত্মবিকাশ ও পেশাগত অগ্রগতির মূল সময়কাল নির্দেশ করে।
+- **অন্তর্দশা ({antar_dasha}) সুযোগ ও সচেতনতা**: সক্রিয় {antar_dasha} অন্তর্দশার প্রভাব তাৎক্ষণিক সিদ্ধান্ত ও পরিকল্পনা রূপায়ণে নতুন দিগন্ত উন্মোচন করে। সুশৃঙ্খল পদক্ষেপ সর্বোচ্চ শুভফল নিশ্চিত করবে।
 
-Seeker Details: Name: {profile_name}, Active Dasha: {maha_dasha} Mahadasha / {antar_dasha} Antardasha
+### Planetary Yogas & Auspicious Formations
+- **সক্রিয় শুভ যোগ ({yoga_name1})**: {yoga_desc1}
+- **কসমিক সমৃদ্ধি ও সম্পদ প্রবাহ ({yoga_name2})**: {yoga_desc2}
+- **আধ্যাত্মিক বিবর্তন ও কর্মিক শিক্ষা**: রাহূ-কেতু ও শনি গ্রহের অবস্থান অন্তর্জাগরণ জাগ্রত করে, জীবনের চ্যালেঞ্জগুলিকে পরম অভিজ্ঞতায় রূপান্তর করতে সাহায্য করে।
 
-Instructions:
-1. Begin with a clean heading:
-### Tradition-Specific Deep Dive ({tradition.upper()})
-2. Use the classical principles of {tradition.upper()} astrology to explain the karmic significance and practical guidance for their current active Dasha ({maha_dasha}/{antar_dasha}) right now.
-3. Provide 2-3 focused guidance points as bullet points with bold titles.
-4. Do NOT output raw hashtags like ### at random places or multiple stars. Keep the text clean, respectful, and eloquent.
-5. {lang_inst}
-"""
-    
+### Sacred Vedic Upayas & Remedial Directives
+- **নির্দিষ্ট বৈদিক মন্ত্র জপ**: প্রতিদিন ভোরে সূর্যোদয়কালে শান্ত চিত্তে `ওঁ নমো ভগবতে বাসুদেবায়` অথবা আপনার ইষ্ট মন্ত্র ১০৮ বার জপ করুন, যা মানসিক স্থৈর্য ও আত্মবিশ্বাস বৃদ্ধি করবে।
+- **রত্ন ও শুভ ধাতুর ভারসাম্য**: লগ্নপতির অনুকূল রত্ন (যেমন হলুদ পোখরাজ, রক্তপ্রবাল বা পান্না) এবং শুভ ধাতু ধারণ গ্রহের ইতিবাচক স্পন্দনকে শক্তিশালী করে।
+- **নিত্য সাধনা ও শুভ দান**: রবিবারে তাম্রপাত্রে সূর্যদেবের উদ্দেশ্যে জল নিবেদন (সূর্য অর্ঘ্য) এবং অভাবগ্রস্তদের অন্ন বা বস্ত্র দান করলে কর্মিক বাধা দূরীভূত হয়।"""
+
+        return f"""### Cosmic Synthesis & Lagna Archetype
+- **Ascendant ({lagna_rashi}) Core Vitality**: Your Lagna in {lagna_rashi} anchors your fundamental constitution, personal charisma, and psychological resilience. It defines how you meet challenges and grants the steadfast willpower needed to accomplish significant worldly and spiritual goals.
+- **Janma Nakshatra ({lagna_nak}) Intuition**: Governed by {lagna_nak}, your mental processing and subconscious instincts are imbued with sharp discernment and perception, guiding strategic judgment in crucial personal and professional crossroads.
+- **Lagna Lord & Soul Orientation**: The ruling planet of your Ascendant directs your life force toward intellectual growth, practical leadership, and cultivating lasting authority within your domain.
+
+### Bhava Alignments & House Lord Dynamics
+- **Karma Sthana & Professional Prominence (10th Bhava in {h10_sign})**: Ruled by {h10_lord}, your 10th house highlights natural administrative capability, ethical business acumen, and organizational foresight. Professional expansion flourishes through disciplined accountability and structured execution.
+- **Dhana & Labha Prosperity Vectors (2nd & 11th Bhavas in {h2_sign} & {h11_sign})**: Governed by {h2_lord} and {h11_lord}, these houses formulate an auspicious financial matrix, favoring steady capital accumulation, resource retention, and multiple long-term prosperity channels.
+- **Kendra & Trikona Equilibrium**: The harmonious interplay between the quadrant pillars (1st, 4th, 7th, 10th Kendras) and trines (1st, 5th, 9th Trikonas) establishes enduring life balance, shielding your progress against short-term cyclic fluctuations.
+
+### Tradition-Specific Deep Dive ({trad_title})
+- **Classical Sutra Exposition**: Applying {trad_title} classical sutras reveals powerful planetary conjunctions in your chart. Classical principles indicate that channeling natal planetary strengths with moral discipline mitigates conflicting transit vibrations.
+- **Active Mahadasha ({maha_dasha}) Karmic Influence**: Operating under the major cycle of {maha_dasha} marks a profound period of transformation and personal evolution. This period accelerates your learning curve and positions you for pivotal life achievements.
+- **Antardasha ({antar_dasha}) Catalyst & Opportunity**: The current sub-period of {antar_dasha} acts as an immediate catalyst for growth. Focus on steady, structured initiatives, avoid impulsive speculative ventures, and consolidate foundational assets.
+
+### Planetary Yogas & Auspicious Celestial Formations
+- **Active Auspicious Yoga ({yoga_name1})**: {yoga_desc1}
+- **Cosmic Wealth & Fortune Harmony ({yoga_name2})**: {yoga_desc2}
+- **Karmic Growth & Spiritual Evolution**: Placements along the karmic nodal axis stimulate inner awakening, urging you to transform life challenges into spiritual clarity, psychological maturity, and enduring wisdom.
+
+### Sacred Vedic Upayas, Sadhana & Remedial Directives
+- **Prescribed Navagraha & Ishta Devata Mantras**: Recite the sacred Vedic mantra `Om Namo Bhagavate Vasudevaya` or your personalized Navagraha Gayatri mantra (108 times daily at dawn) to align pranic vitality and mental tranquility.
+- **Harmonic Gemstone & Elemental Guidance**: Wearing natural auspicious gemstones (such as Yellow Sapphire, Ruby, or Emerald as per your Lagna lord) in consecrated metals on designated weekdays enhances benefic vibrations and pacifies malefic transits.
+- **Nitya Sadhana & Charitable Daan Offerings**: Offer morning Surya Arghya (fresh water with copper vessel facing east) and engage in weekly charitable acts (daan of yellow grains, lentils, or warm clothing) to dissolve karmic obstacles and foster auspicious prosperity."""
+
     def clean_output(text: str) -> str:
         if not text:
             return ""
@@ -754,23 +856,35 @@ Instructions:
             cleaned = re.sub(r'\s*\(In (?:fluent )?[A-Za-z\s]+script:[^\)]*\)\s*', '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip()
 
-    try:
-        part1_res = fetch_part(prompt1)
-        part2_res = fetch_part(prompt2)
-        
-        part1_clean = clean_output(part1_res)
-        part2_clean = clean_output(part2_res)
-        
-        return f"{part1_clean}\n\n{part2_clean}"
-    except Exception as e:
-        print(f"Warning: Interpretation LLM failed ({e}), using dynamic Vedic astrological calculation fallback.")
-        return f"""### Cosmic Synthesis & Lagna Archetype
-- **Ascendant ({lagna_rashi})**: Your Lagna governs fundamental vitality, personal resilience, and the primary direction of your karmic expression.
-- **Nakshatra ({lagna_nak})**: Bestows sharp intuition, intellectual depth, and leadership qualities that guide your professional and personal decisions.
+    lang_inst = "All text MUST be 100% in English only."
+    if language == 'bn':
+        lang_inst = "All text MUST be written in fluent, authentic Bengali script."
+    elif language and language != 'en':
+        lang_inst = f"All text MUST be in language code: {language}."
 
-### Tradition-Specific Deep Dive ({tradition.upper()})
-- **Active Dasha**: Operating under the **{maha_dasha} Mahadasha** and **{antar_dasha} Antardasha**.
-- **Karmic Focus**: This period activates important transformations in career, wealth consolidation, and personal growth. Focus on steady discipline and moral clarity for maximum spiritual and material success."""
+    system_prompt = f"""You are AstroJunction Daivajna, an authentic, revered Vedic Astrologer providing personalized, enlightened astrological counsel for {profile_name}.
+Tradition: {trad_title}. Lagna: {lagna_rashi} ({lagna_nak}). Active Dasha: {maha_dasha} Mahadasha / {antar_dasha} Antardasha.
+
+Deliver an exhaustive, authoritative Vedic interpretation formatted into EXACTLY these 5 sections with bold bullet points:
+### Cosmic Synthesis & Lagna Archetype
+### Bhava Alignments & House Lord Dynamics
+### Tradition-Specific Deep Dive ({trad_title})
+### Planetary Yogas & Auspicious Celestial Formations
+### Sacred Vedic Upayas, Sadhana & Remedial Directives
+
+{lang_inst}
+"""
+
+    try:
+        history = [{"role": "user", "content": f"Please provide my complete 5-section {tradition} astrological synthesis."}]
+        res = _execute_llm(system_prompt, history)
+        cleaned = clean_output(res)
+        if len(cleaned) > 250 and "###" in cleaned:
+            return cleaned
+        return generate_full_5_card_synthesis()
+    except Exception as e:
+        print(f"Notice: Interpretation LLM offline/fallback ({e}), delivering rich 5-card dynamic Vedic calculation synthesis.")
+        return generate_full_5_card_synthesis()
 
 
 

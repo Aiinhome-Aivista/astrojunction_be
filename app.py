@@ -25,6 +25,7 @@ from controllers import llm_generation_controller
 from controllers import full_report_controller
 from controllers import AI_response
 from controllers import payment_controller
+from controllers import subscription_controller
 import jwt as pyjwt
 
 
@@ -222,7 +223,6 @@ def calculate_numerology_route():
 
 # ---------------- Matchmaking / Kundli Milan reports (require login) ----------------
 
-
 @app.route("/matchmaking/reports", methods=["POST"])
 @app.route("/api/matchmaking/reports", methods=["POST"])
 @require_auth
@@ -247,6 +247,7 @@ def get_match_report1(report_id):
     return match_making.get_match_report(request.user_id, report_id)
 
 
+@app.route("/matchmaking/reports/<report_id>/pdf", methods=["GET"])
 @app.route("/matchmaking/reports/<report_id>/pdf", methods=["GET"])
 @app.route("/api/matchmaking/reports/<report_id>/pdf", methods=["GET"])
 def get_match_report_pdf1(report_id):
@@ -539,6 +540,37 @@ def payment_webhook():
 @require_auth
 def get_payment_history():
     return payment_controller.get_transactions()
+
+
+    # ---------------- Subscriptions & Payment Logic ----------------
+
+@app.route("/api/subscription-plans/active", methods=["GET"])
+def get_active_subscription_plans():
+    return subscription_controller.get_active_plans()
+
+@app.route("/api/admin/subscription-plans", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_subscription_plans():
+    return subscription_controller.admin_get_all_plans()
+
+@app.route("/api/admin/subscription-plans", methods=["POST"])
+@require_auth
+@require_admin
+def admin_create_subscription_plan():
+    return subscription_controller.admin_create_plan()
+
+@app.route("/api/admin/subscription-plans/<plan_id>", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_update_subscription_plan(plan_id):
+    return subscription_controller.admin_update_plan(plan_id)
+
+@app.route("/api/admin/subscription-plans/<plan_id>", methods=["DELETE"])
+@require_auth
+@require_admin
+def admin_delete_subscription_plan(plan_id):
+    return subscription_controller.admin_delete_plan(plan_id)
 
 
 if __name__ == "__main__":

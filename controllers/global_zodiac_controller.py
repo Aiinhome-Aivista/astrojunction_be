@@ -24,12 +24,12 @@ def zodiac_forecast():
     try:
         forecast_json_str = get_zodiac_forecast_response(sign, timeframe, language)
         forecast_data = json.loads(forecast_json_str)
-        return jsonify({"data": forecast_data})
+        return jsonify({"status": "success", "data": forecast_data})
     except Exception as e:
         print(f"Error in zodiac_forecast: {e}")
         from services.llm_service import _generate_fallback_zodiac_forecast
         fallback = _generate_fallback_zodiac_forecast(sign, timeframe, language)
-        return jsonify({"data": fallback})
+        return jsonify({"status": "success", "data": fallback})
 
 def zodiac_compatibility():
     data = request.json or {}
@@ -42,10 +42,10 @@ def zodiac_compatibility():
         from services.llm_service import get_zodiac_compatibility_response
         compat_json_str = get_zodiac_compatibility_response(sign_a, sign_b, system, language)
         compat_data = json.loads(compat_json_str)
-        return jsonify({"data": compat_data})
+        return jsonify({"status": "success", "data": compat_data})
     except Exception as e:
         print(f"Error in zodiac_compatibility: {e}")
-        return jsonify({"data": {
+        return jsonify({"status": "success", "data": {
             "overallScore": 75,
             "elementSynergy": f"Harmonious alignment between {sign_a} and {sign_b}.",
             "romanceAnalysis": "Planetary energies create mutual attraction and shared vision.",

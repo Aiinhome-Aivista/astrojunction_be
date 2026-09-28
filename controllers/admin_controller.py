@@ -111,7 +111,20 @@ def update_llm_config():
     from services.settings_service import update_llm_config as save_llm_config, get_llm_config as fetch_llm_config
     try:
         payload = request.get_json(silent=True) or {}
-        save_llm_config(payload, updated_by="admin")
+        
+        # Extract email from JWT token for updated_by
+        admin_email = "admin"
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+            try:
+                from utils.security import decode_token
+                token_payload = decode_token(token)
+                admin_email = token_payload.get("sub", "admin")
+            except Exception:
+                pass
+                
+        save_llm_config(payload, updated_by=admin_email)
         updated_config = fetch_llm_config()
         return jsonify({
             "status": "success",
