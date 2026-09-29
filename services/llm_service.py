@@ -81,7 +81,7 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
             resp = requests.post(
                 f"{base_url}/api/generate",
                 headers={"Connection": "close"},
-                json={"model": model, "prompt": prompt, "stream": False},
+                json={"model": model, "prompt": prompt, "stream": False, "temperature": 0.1},
                 timeout=timeout,
             )
         except requests.RequestException:
@@ -92,7 +92,7 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
                 resp = requests.post(
                     f"{base_url}/v1/chat/completions",
                     headers={"Connection": "close"},
-                    json={"model": model, "messages": messages},
+                    json={"model": model, "messages": messages, "temperature": 0.1},
                     timeout=timeout,
                 )
                 if resp.status_code == 200:
@@ -140,7 +140,7 @@ def _call_mistral_cloud(system_prompt: str, history: list) -> str:
         resp = requests.post(
             f"{base_url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Connection": "close"},
-            json={"model": model, "messages": messages},
+            json={"model": model, "messages": messages, "temperature": 0.1},
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -224,7 +224,7 @@ def _call_openai(system_prompt: str, history: list) -> str:
         resp = requests.post(
             f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Connection": "close"},
-            json={"model": model, "messages": messages},
+            json={"model": model, "messages": messages, "temperature": 0.1},
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -868,6 +868,7 @@ Tradition: {trad_title}. Lagna: {lagna_rashi} ({lagna_nak}). Active Dasha: {maha
 Deliver an exhaustive, authoritative Vedic interpretation formatted into EXACTLY these 5 sections with bold bullet points:
 ### Cosmic Synthesis & Lagna Archetype
 ### Bhava Alignments & House Lord Dynamics
+(For Bhava Alignments, you MUST provide exactly 12 points, one for each house from 1st to 12th)
 ### Tradition-Specific Deep Dive ({trad_title})
 ### Planetary Yogas & Auspicious Celestial Formations
 ### Sacred Vedic Upayas, Sadhana & Remedial Directives
