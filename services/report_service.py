@@ -2952,7 +2952,7 @@ def generate_ai_synthesis_pdf(row: dict) -> bytes:
         bottomMargin=18 * mm,
         leftMargin=13 * mm,
         rightMargin=13 * mm,
-        title="AstroJunction AI Compatibility Synthesis",
+        title="AstroJunction Vedic Astrology Compatibility Synthesis",
     )
 
     styles = _styles()
