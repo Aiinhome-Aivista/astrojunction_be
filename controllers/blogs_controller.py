@@ -1,6 +1,56 @@
 from flask import request, jsonify
 from database.db_connection import get_db_connection
 import json
+import re
+import unicodedata
+import time
+
+def generate_slug(text: str) -> str:
+    """Generate a URL-friendly slug from text."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("utf-8")
+    text = re.sub(r"[^\w\s-]", "", text).strip().lower()
+    return re.sub(r"[-\s]+", "-", text)
+
+def _get_unique_slug(cursor, title: str, blog_id: int = 0) -> str:
+    base_slug = generate_slug(title) or f"blog-{blog_id or int(time.time())}"
+    slug = base_slug
+    counter = 1
+    while True:
+        cursor.execute("SELECT id FROM blogs WHERE slug = %s AND id != %s", (slug, blog_id))
+        if not cursor.fetchone():
+            break
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+    return slug
+
+def ensure_slug_schema():
+    """Ensure slug column exists in blogs table and populate any missing slugs."""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SHOW COLUMNS FROM blogs LIKE %s", ("slug",))
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE blogs ADD COLUMN slug VARCHAR(255) UNIQUE AFTER title")
+            conn.commit()
+
+        cursor.execute("SELECT id, title, slug FROM blogs WHERE slug IS NULL OR slug = ''")
+        rows = cursor.fetchall()
+        for row in rows:
+            slug = _get_unique_slug(cursor, row["title"], row["id"])
+            cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, row["id"]))
+        conn.commit()
+    except Exception as e:
+        print(f"Slug schema check error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+# Auto-verify on controller load
+ensure_slug_schema()
 
 def list_blogs():
     conn = get_db_connection()
@@ -9,11 +59,16 @@ def list_blogs():
     
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.callproc('sp_blog_ops', ('get_all', 0, '', '', '', '', '', '', '', '[]', 0))
+        status_filter = request.args.get('status', '')
         
-        blogs = []
-        for result in cursor.stored_results():
-            blogs = result.fetchall()
+        if status_filter.lower() == 'all':
+            cursor.execute("SELECT * FROM blogs ORDER BY pinned DESC, created_at DESC")
+        elif status_filter:
+            cursor.execute("SELECT * FROM blogs WHERE status = %s ORDER BY pinned DESC, created_at DESC", (status_filter,))
+        else:
+            cursor.execute("SELECT * FROM blogs WHERE status = 'Published' ORDER BY pinned DESC, created_at DESC")
+        
+        blogs = cursor.fetchall()
             
         # Parse tags from JSON string to list if necessary
         for blog in blogs:
@@ -100,11 +155,17 @@ def create_blog():
         for result in cursor.stored_results():
             new_blog = result.fetchone()
             
-        if new_blog and new_blog.get('tags'):
-            try:
-                new_blog['tags'] = json.loads(new_blog['tags'])
-            except:
-                pass
+        if new_blog:
+            new_id = new_blog.get('id')
+            slug = _get_unique_slug(cursor, data.get('title'), new_id)
+            cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, new_id))
+            conn.commit()
+            new_blog['slug'] = slug
+            if new_blog.get('tags'):
+                try:
+                    new_blog['tags'] = json.loads(new_blog['tags'])
+                except:
+                    pass
                 
         return jsonify({"status": "success", "data": new_blog}), 201
     except Exception as e:
@@ -153,6 +214,11 @@ def update_blog(blog_id):
         if not updated_blog:
             return jsonify({"status": "error", "message": "Blog not found"}), 404
             
+        slug = _get_unique_slug(cursor, data.get('title'), blog_id)
+        cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, blog_id))
+        conn.commit()
+        updated_blog['slug'] = slug
+
         if updated_blog.get('tags'):
             try:
                 updated_blog['tags'] = json.loads(updated_blog['tags'])
@@ -303,3 +369,107 @@ def delete_subcategory(subcategory_id):
         return jsonify({"status": "error", "message": "Failed to delete subcategory"}), 500
     finally:
         if conn: conn.close()
+
+
+def get_blog_by_slug(slug):
+    """Fetch a single published blog by its slug (for public BlogPage)."""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"status": "error", "message": "Database connection failed"}), 500
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM blogs WHERE slug = %s AND status = 'Published' LIMIT 1",
+            (slug,)
+        )
+        blog = cursor.fetchone()
+        if not blog:
+            return jsonify({"status": "error", "message": "Blog not found"}), 404
+        if blog.get('tags'):
+            try:
+                blog['tags'] = json.loads(blog['tags'])
+            except (TypeError, json.JSONDecodeError):
+                pass
+        else:
+            blog['tags'] = []
+        return jsonify({"status": "success", "data": blog}), 200
+    except Exception as e:
+        print(f"Error fetching blog by slug: {e}")
+        return jsonify({"status": "error", "message": "Failed to fetch blog"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def increment_blog_share(blog_id):
+    """Increment share count for a blog."""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"status": "error", "message": "Database connection failed"}), 500
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "UPDATE blogs SET shares_count = COALESCE(shares_count, 0) + 1 WHERE id = %s",
+            (blog_id,)
+        )
+        conn.commit()
+        cursor.execute("SELECT id, shares_count FROM blogs WHERE id = %s", (blog_id,))
+        row = cursor.fetchone()
+        return jsonify({"status": "success", "data": row}), 200
+    except Exception as e:
+        conn.rollback()
+        print(f"Error incrementing share: {e}")
+        return jsonify({"status": "error", "message": "Failed to increment share"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def upload_blog_image():
+    """Handle secure image upload for blog posts."""
+    import os, time
+    from werkzeug.utils import secure_filename
+    
+    # Read upload path dynamically from .env or default to upload/blogs_image
+    env_folder = os.getenv("BLOG_UPLOAD_DIR", "upload/blogs_image").strip().replace('\\', '/')
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    upload_folder = os.path.join(base_dir, *env_folder.split('/'))
+    allowed_exts = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+        
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+        
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in allowed_exts:
+        return jsonify({"error": "File type not allowed"}), 400
+        
+    name = secure_filename(file.filename.rsplit('.', 1)[0])
+    filename = f"{name}_{int(time.time())}.{ext}"
+    os.makedirs(upload_folder, exist_ok=True)
+    file.save(os.path.join(upload_folder, filename))
+    
+    # Return normalized web path (e.g. /upload/blogs_image/xyz.png)
+    web_path = f"/{env_folder}/{filename}"
+    return jsonify({"url": web_path}), 200
+
+
+def serve_uploaded_file(filename):
+    """Serve uploaded blog images and files."""
+    import os
+    from flask import send_from_directory
+    
+    root_dir = os.path.dirname(os.path.dirname(__file__))
+    # Check in upload directory
+    upload_dir = os.path.join(root_dir, 'upload')
+    if os.path.exists(os.path.join(upload_dir, filename)):
+        return send_from_directory(upload_dir, filename)
+    # Check in static/uploads directory fallback
+    static_upload_dir = os.path.join(root_dir, 'static', 'uploads')
+    if os.path.exists(os.path.join(static_upload_dir, filename)):
+        return send_from_directory(static_upload_dir, filename)
+        
+    return send_from_directory(upload_dir, filename)

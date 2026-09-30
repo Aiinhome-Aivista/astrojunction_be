@@ -1,3 +1,4 @@
+app.py
 # AstroJunction Backend API Server
 from dotenv import load_dotenv
 load_dotenv()
@@ -356,6 +357,23 @@ def post_category():
 def delete_category(category_id):
     return blogs_controller.delete_category(category_id)
 
+@app.route("/api/blogs/slug/<path:slug>", methods=["GET"])
+def get_blog_by_slug(slug):
+    return blogs_controller.get_blog_by_slug(slug)
+
+@app.route("/api/blogs/<int:blog_id>/share", methods=["POST"])
+def share_blog(blog_id):
+    return blogs_controller.increment_blog_share(blog_id)
+
+@app.route("/api/upload/blog-image", methods=["POST"])
+def upload_blog_image():
+    return blogs_controller.upload_blog_image()
+
+@app.route("/upload/<path:filename>", methods=["GET"])
+@app.route("/uploads/<path:filename>", methods=["GET"])
+def serve_uploaded_file(filename):
+    return blogs_controller.serve_uploaded_file(filename)
+
 @app.route("/api/subcategories", methods=["GET"])
 def get_subcategories():
     return blogs_controller.get_subcategories()
@@ -579,4 +597,3 @@ if __name__ == "__main__":
     conn = get_db_connection()
     conn.close()
     app.run(host="0.0.0.0", port=5001, debug=True)
-
