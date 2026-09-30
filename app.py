@@ -1,4 +1,3 @@
-app.py
 # AstroJunction Backend API Server
 from dotenv import load_dotenv
 load_dotenv()
