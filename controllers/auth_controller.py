@@ -22,10 +22,13 @@ def register():
     email = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
     full_name = (body.get("fullName") or body.get("name") or "").strip()
+    phone = (body.get("phone") or body.get("phoneNumber") or "").strip()
     
     # Address / Birth place
     birth_place = (body.get("birthPlace") or body.get("address") or "").strip()
     address = (body.get("address") or birth_place or "Kolkata, West Bengal, India").strip()
+    if not address:
+        address = "Kolkata, West Bengal, India"
     if not birth_place:
         birth_place = address
 
@@ -70,8 +73,6 @@ def register():
         return _error("Password must be at least 8 characters", "WEAK_PASSWORD")
     if not full_name:
         return _error("Full name is required", "INVALID_NAME")
-    if not address and not birth_place:
-        return _error("Full address or birth place is required", "INVALID_ADDRESS")
 
     # Geocode coordinates if not directly supplied in payload
     latitude = body.get("latitude")
@@ -87,19 +88,23 @@ def register():
 
     if latitude is None or longitude is None:
         search_query = address or birth_place
-        try:
-            geolocator = Nominatim(user_agent="astrojunction-app")
-            parts = [p.strip() for p in search_query.split(',') if p.strip()]
-            while parts:
-                current_query = ', '.join(parts)
-                location = geolocator.geocode(current_query)
-                if location:
-                    latitude = location.latitude
-                    longitude = location.longitude
-                    break
-                parts.pop(0)
-        except Exception as e:
-            print("Geocoding error:", e)
+        if not search_query or search_query == "Kolkata, West Bengal, India":
+            latitude = 22.5726
+            longitude = 88.3639
+        else:
+            try:
+                geolocator = Nominatim(user_agent="astrojunction-app")
+                parts = [p.strip() for p in search_query.split(',') if p.strip()]
+                while parts:
+                    current_query = ', '.join(parts)
+                    location = geolocator.geocode(current_query)
+                    if location:
+                        latitude = location.latitude
+                        longitude = location.longitude
+                        break
+                    parts.pop(0)
+            except Exception as e:
+                print("Geocoding error:", e)
 
     # Defaults if geocoding failed or returned none
     if latitude is None:
@@ -121,18 +126,31 @@ def register():
     user = user_rows[0]
     token = issue_token(user["id"], user["role"])
 
-    # Automatically create the primary user profile in user_profiles table
-    profile_id = str(uuid.uuid4())
+    # Update phone number if provided
+    if phone:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET phone = %s WHERE id = %s", (phone, user["id"]))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as pe:
+            print(f"[REGISTER PHONE WARNING] {pe}")
+
+    # Only create a primary user profile if explicit birth details are provided
     created_profile = None
-    try:
-        profile_rows = call_procedure("sp_profile_ops", [
-            'create', profile_id, user["id"], full_name, gender, birth_date, birth_time, birth_place,
-            latitude, longitude, tz_offset, focus_areas_json, notes, horoscope_system, relation_label
-        ])
-        if profile_rows:
-            created_profile = _row_to_profile(profile_rows[0])
-    except Exception as prof_err:
-        print(f"[REGISTER WARNING] Could not auto-create profile: {prof_err}")
+    if body.get("birthDate") and body.get("birthTime") and body.get("birthPlace"):
+        profile_id = str(uuid.uuid4())
+        try:
+            profile_rows = call_procedure("sp_profile_ops", [
+                'create', profile_id, user["id"], full_name, gender, birth_date, birth_time, birth_place,
+                latitude, longitude, tz_offset, focus_areas_json, notes, horoscope_system, relation_label
+            ])
+            if profile_rows:
+                created_profile = _row_to_profile(profile_rows[0])
+        except Exception as prof_err:
+            print(f"[REGISTER WARNING] Could not create profile: {prof_err}")
 
     # Instigate Registration Confirmation Email
     try:
@@ -155,6 +173,7 @@ def register():
                 "email": email,
                 "fullName": user["full_name"],
                 "role": user["role"],
+                "phone": phone or None,
                 "address": user.get("address"),
                 "latitude": float(user["latitude"]) if user.get("latitude") is not None else None,
                 "longitude": float(user["longitude"]) if user.get("longitude") is not None else None,
@@ -200,6 +219,7 @@ def login():
                 "email": user["email"],
                 "fullName": user["full_name"],
                 "role": user["role"],
+                "phone": user.get("phone"),
                 "address": user.get("address"),
                 "latitude": float(user["latitude"]) if user.get("latitude") is not None else None,
                 "longitude": float(user["longitude"]) if user.get("longitude") is not None else None,
@@ -223,6 +243,7 @@ def me(user_id):
             "email": user["email"],
             "fullName": user["full_name"],
             "role": user["role"],
+            "phone": user.get("phone"),
             "address": user.get("address"),
             "latitude": float(user["latitude"]) if user.get("latitude") is not None else None,
             "longitude": float(user["longitude"]) if user.get("longitude") is not None else None,
@@ -240,12 +261,22 @@ def google_auth():
         return _error("A valid Google email is required", "INVALID_EMAIL")
 
     # Check if user already exists
-    rows = call_procedure("sp_get_user_by_email", [email])
+    rows = call_procedure("sp_user_ops", ['get_by_email', '', email, '', '', '', None, None])
     if rows:
         user = rows[0]
         if not user["is_active"]:
             return _error("This account has been deactivated", "ACCOUNT_DISABLED", 403)
         token = issue_token(user["id"], user["role"])
+
+        profiles_data = []
+        try:
+            prof_rows = call_procedure("sp_profile_ops", ['get_all', '', user["id"], '', '', '2000-01-01', '00:00:00', '', 0, 0, 0, '[]', '', '', ''])
+            profiles_data = [_row_to_profile(r) for r in prof_rows]
+        except Exception as pe:
+            print(f"[GOOGLE LOGIN PROFILE LOAD WARNING] {pe}")
+
+        primary_profile = profiles_data[0] if profiles_data else None
+
         return jsonify({
             "status": "success",
             "data": {
@@ -255,7 +286,13 @@ def google_auth():
                     "email": user["email"],
                     "fullName": user["full_name"],
                     "role": user["role"],
+                    "phone": user.get("phone"),
+                    "address": user.get("address"),
+                    "latitude": float(user["latitude"]) if user.get("latitude") is not None else None,
+                    "longitude": float(user["longitude"]) if user.get("longitude") is not None else None,
                 },
+                "profile": primary_profile,
+                "profiles": profiles_data,
             },
         })
 
@@ -265,10 +302,10 @@ def google_auth():
     password_hash = hash_password(random_pw)
 
     try:
-        new_rows = call_procedure("sp_create_user", [user_id, email, password_hash, full_name])
+        new_rows = call_procedure("sp_user_ops", ['create', user_id, email, password_hash, full_name, 'Kolkata, West Bengal, India', 22.5726, 88.3639])
     except IntegrityError:
         # Fallback if race condition occurred
-        existing = call_procedure("sp_get_user_by_email", [email])
+        existing = call_procedure("sp_user_ops", ['get_by_email', '', email, '', '', '', None, None])
         if existing:
             user = existing[0]
             token = issue_token(user["id"], user["role"])
@@ -292,6 +329,21 @@ def google_auth():
     user = new_rows[0]
     token = issue_token(user["id"], user["role"])
 
+    # Do not create a fake profile with hardcoded data for new Google users.
+    # The frontend onboarding popup will collect their authentic birth parameters.
+    created_profile = None
+
+    # Instigate Registration Confirmation Email
+    try:
+        from services.email_service import send_registration_confirmation_email
+        send_registration_confirmation_email(
+            email=email,
+            full_name=full_name,
+            birth_date="2000-01-01"
+        )
+    except Exception as email_err:
+        print(f"[AUTH EMAIL WARNING] Could not dispatch registration confirmation email: {email_err}")
+
     return jsonify({
         "status": "success",
         "data": {
@@ -301,7 +353,13 @@ def google_auth():
                 "email": email,
                 "fullName": user["full_name"],
                 "role": user["role"],
+                "phone": None,
+                "address": user.get("address"),
+                "latitude": float(user["latitude"]) if user.get("latitude") is not None else None,
+                "longitude": float(user["longitude"]) if user.get("longitude") is not None else None,
             },
+            "profile": created_profile,
+            "profiles": [created_profile] if created_profile else [],
         },
     }), 201
 
