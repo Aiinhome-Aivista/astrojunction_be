@@ -522,9 +522,15 @@ def record_session_activity(response):
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    """Global error handler to catch exceptions and log them."""
+    """Global error handler to catch exceptions and log unexpected backend errors."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return jsonify({"error": e.name, "message": e.description}), e.code
+
     import traceback
-    error_msg = f"{str(e)}\n{traceback.format_exc()}"
+    path = getattr(request, 'path', 'unknown')
+    method = getattr(request, 'method', 'unknown')
+    error_msg = f"[{method} {path}] {str(e)}\n{traceback.format_exc()}"
     print(f"[ERROR] Global Exception: {error_msg}")
     try:
         admin_controller.log_system_error('error', error_msg, 'flask_app')

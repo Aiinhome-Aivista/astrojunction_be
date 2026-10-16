@@ -2,6 +2,17 @@ from flask import jsonify
 from database.db_connection import get_db_connection
 import uuid
 
+import datetime
+
+def _serialize_dates(obj):
+    if isinstance(obj, dict):
+        return {k: _serialize_dates(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_serialize_dates(i) for i in obj]
+    elif isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.strftime('%Y-%m-%d %H:%M:%S')
+    return obj
+
 def _get_data(data_type):
     """Helper to fetch data using the master SP sp_get_admin_data."""
     conn = None
@@ -19,7 +30,7 @@ def _get_data(data_type):
                 data = result_set.fetchall()
             break
             
-        return jsonify({"status": "success", "data": data}), 200
+        return jsonify({"status": "success", "data": _serialize_dates(data)}), 200
     except Exception as e:
         print(f"Error fetching {data_type}: {str(e)}")
         return jsonify({"status": "error", "message": f"Failed to retrieve {data_type}"}), 500
