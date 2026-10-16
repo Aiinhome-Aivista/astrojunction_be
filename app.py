@@ -457,6 +457,68 @@ def get_seo_config():
 def update_seo_config():
     return admin_controller.update_seo_config()
 
+# ==========================================
+# 📊 USER SESSIONS & EVENT TRACKING APIs
+# ==========================================
+
+@app.route("/api/track/event", methods=["POST"])
+def track_client_event():
+    return admin_controller.track_client_event()
+
+@app.route("/api/admin/telemetry/stats", methods=["GET"])
+@app.route("/api/admin/sessions/stats", methods=["GET"])
+# @require_auth
+def get_telemetry_stats():
+    return admin_controller.get_telemetry_stats()
+
+@app.route("/api/admin/sessions", methods=["GET"])
+@app.route("/api/admin/telemetry/sessions", methods=["GET"])
+# @require_auth
+def get_telemetry_sessions():
+    return admin_controller.get_telemetry_sessions()
+
+@app.route("/api/admin/events", methods=["GET"])
+@app.route("/api/admin/telemetry/events", methods=["GET"])
+# @require_auth
+def get_telemetry_events():
+    return admin_controller.get_telemetry_events()
+
+@app.route("/api/admin/sessions/<session_id>/timeline", methods=["GET"])
+@app.route("/api/admin/telemetry/sessions/<session_id>/timeline", methods=["GET"])
+# @require_auth
+def get_session_timeline(session_id):
+    return admin_controller.get_session_timeline(session_id)
+
+
+@app.after_request
+def record_session_activity(response):
+    if request.method == "OPTIONS":
+        return response
+    try:
+        session_id = request.headers.get("x-session-id")
+        if session_id:
+            user_id = getattr(request, "user_id", None)
+            if not user_id:
+                auth = request.headers.get("Authorization", "")
+                if auth.startswith("Bearer "):
+                    try:
+                        from utils.security import decode_token
+                        user_id = decode_token(auth.split(" ", 1)[1]).get("sub")
+                    except Exception:
+                        pass
+            from services.telemetry_service import record_session, get_client_ip
+            record_session(
+                session_id=session_id,
+                user_id=user_id,
+                ip_address=get_client_ip(request),
+                user_agent=request.headers.get("User-Agent")
+            )
+    except Exception:
+        pass
+    return response
+
+
+
 
 @app.errorhandler(Exception)
 def handle_exception(e):

@@ -112,14 +112,36 @@ def get_dynamic_insights():
         return _error(str(e), "LLM_ERROR", 500)
 
 def calculate_numerology_endpoint():
+    import time
+    start_time = time.time()
     body = request.get_json(silent=True) or {}
     full_name = body.get("fullName", "")
     dob_str = body.get("birthDate", "")
+    session_id = request.headers.get("x-session-id")
     
     try:
         from services.numerology_service import calculate_numerology_report
         report_data = calculate_numerology_report(full_name, dob_str)
+
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="NUMEROLOGY_CALCULATION",
+                    event_category="NUMEROLOGY",
+                    input_payload={"name": full_name, "birthDate": dob_str},
+                    status="SUCCESS",
+                    result_summary={"mulank": report_data.get("mulank"), "bhagyank": report_data.get("bhagyank"), "namank": report_data.get("namank_chaldean")},
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
+
         return jsonify({"status": "success", "data": report_data})
     except Exception as e:
         print(f"Error in calculate_numerology_endpoint: {e}")
         return _error(str(e), "CALCULATION_ERROR", 500)
+

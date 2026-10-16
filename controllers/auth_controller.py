@@ -163,6 +163,25 @@ def register():
     except Exception as email_err:
         print(f"[AUTH EMAIL WARNING] Could not dispatch registration confirmation email: {email_err}")
 
+    session_id = request.headers.get("x-session-id")
+    if session_id:
+        try:
+            from services.telemetry_service import record_event, record_session
+            record_session(session_id=session_id, user_id=user["id"], ip_address=request.remote_addr, user_agent=request.headers.get("User-Agent"))
+            record_event(
+                session_id=session_id,
+                event_name="USER_REGISTRATION",
+                event_category="AUTH",
+                user_id=user["id"],
+                input_payload={"email": email, "fullName": full_name, "birthPlace": birth_place, "birthDate": birth_date},
+                status="SUCCESS",
+                result_summary={"status": "registered", "user_id": user["id"], "role": user["role"]},
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent")
+            )
+        except Exception:
+            pass
+
     return jsonify({
         "status": "success",
         "message": "User registered and primary profile created successfully",
@@ -187,15 +206,47 @@ def login():
     body = request.get_json(silent=True) or {}
     email = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
+    session_id = request.headers.get("x-session-id")
 
     rows = call_procedure("sp_user_ops", ['get_by_email', '', email, '', '', '', None, None])
     if not rows:
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="USER_LOGIN",
+                    event_category="AUTH",
+                    input_payload={"email": email},
+                    status="FAILURE",
+                    error_message="Invalid email or password",
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
         return _error("Invalid email or password", "INVALID_CREDENTIALS", 401)
 
     user = rows[0]
     if not user["is_active"]:
         return _error("This account has been deactivated", "ACCOUNT_DISABLED", 403)
     if not verify_password(password, user["password_hash"]):
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="USER_LOGIN",
+                    event_category="AUTH",
+                    user_id=user["id"],
+                    input_payload={"email": email},
+                    status="FAILURE",
+                    error_message="Invalid email or password (password mismatch)",
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
         return _error("Invalid email or password", "INVALID_CREDENTIALS", 401)
 
     token = issue_token(user["id"], user["role"])
@@ -209,6 +260,24 @@ def login():
         print(f"[LOGIN PROFILE LOAD WARNING] {pe}")
 
     primary_profile = profiles_data[0] if profiles_data else None
+
+    if session_id and user.get("role") != "admin":
+        try:
+            from services.telemetry_service import record_event, record_session
+            record_session(session_id=session_id, user_id=user["id"], ip_address=request.remote_addr, user_agent=request.headers.get("User-Agent"))
+            record_event(
+                session_id=session_id,
+                event_name="USER_LOGIN",
+                event_category="AUTH",
+                user_id=user["id"],
+                input_payload={"email": email},
+                status="SUCCESS",
+                result_summary={"status": "authenticated", "role": user["role"], "fullName": user["full_name"]},
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent")
+            )
+        except Exception:
+            pass
 
     return jsonify({
         "status": "success",

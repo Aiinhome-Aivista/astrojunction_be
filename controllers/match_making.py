@@ -1891,17 +1891,57 @@ def calculate_match_endpoint():
             "gender": body.get("partner2Gender", "female"),
         }
 
+    import time
+    start_time = time.time()
     try:
         partner1 = prepare_partner(partner1)
         partner2 = prepare_partner(partner2)
         
         result = calculate_kundli_milan(partner1, partner2)
+        session_id = request.headers.get("x-session-id")
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                score = result.get("totalScore") or result.get("score") or 0
+                record_event(
+                    session_id=session_id,
+                    event_name="MATCHMAKING_CALCULATION",
+                    event_category="ASTROLOGY",
+                    input_payload={
+                        "partner1": partner1.get("name"),
+                        "partner1Dob": partner1.get("dob"),
+                        "partner2": partner2.get("name"),
+                        "partner2Dob": partner2.get("dob")
+                    },
+                    status="SUCCESS",
+                    result_summary={"score": f"{score}/36", "verdict": result.get("verdict")},
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
+
         return jsonify({
             "status": "success",
             "data": result
         })
     except Exception as exc:
         print(f"Error calculating matchmaking in calculate_match_endpoint: {exc}")
+        session_id = request.headers.get("x-session-id")
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="MATCHMAKING_CALCULATION",
+                    event_category="ASTROLOGY",
+                    status="FAILURE",
+                    error_message=str(exc),
+                    ip_address=request.remote_addr
+                )
+            except Exception:
+                pass
         return _error(f"Failed to calculate Kundli Milan: {exc}", "CALCULATION_ERROR", 500)
 
 

@@ -613,4 +613,42 @@ BEGIN
     LIMIT 1;
 END //
 DELIMITER ;
+-- ------------------------------------------------------------
+-- User Sessions & Event Tracking Tables
+-- ------------------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id                VARCHAR(64)   NOT NULL PRIMARY KEY,
+  user_id           CHAR(36)      NULL,
+  ip_address        VARCHAR(45)   NULL,
+  user_agent        TEXT          NULL,
+  device_type       VARCHAR(32)   NULL DEFAULT 'desktop',
+  started_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_activity_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  is_active         TINYINT(1)    NOT NULL DEFAULT 1,
+  ended_at          TIMESTAMP     NULL,
+  INDEX idx_sessions_user (user_id),
+  INDEX idx_sessions_started (started_at),
+  INDEX idx_sessions_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_event_logs (
+  id                VARCHAR(64)   NOT NULL PRIMARY KEY,
+  session_id        VARCHAR(64)   NOT NULL,
+  user_id           CHAR(36)      NULL,
+  event_name        VARCHAR(100)  NOT NULL,
+  event_category    VARCHAR(50)   NOT NULL DEFAULT 'GENERAL',
+  input_payload     LONGTEXT      NULL,
+  status            ENUM('SUCCESS','FAILURE','PENDING','CANCELLED') NOT NULL DEFAULT 'SUCCESS',
+  result_summary    LONGTEXT      NULL,
+  execution_time_ms INT           NOT NULL DEFAULT 0,
+  error_message     TEXT          NULL,
+  ip_address        VARCHAR(45)   NULL,
+  created_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_events_session (session_id),
+  INDEX idx_events_user (user_id),
+  INDEX idx_events_name (event_name),
+  INDEX idx_events_category (event_category),
+  INDEX idx_events_status (status),
+  INDEX idx_events_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

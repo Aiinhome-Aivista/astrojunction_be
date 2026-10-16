@@ -206,4 +206,108 @@ def update_seo_config():
         print(f"Error updating SEO config: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-        
+def get_telemetry_stats():
+    from flask import request
+    from services.telemetry_service import get_telemetry_stats as fetch_stats
+    try:
+        timeout_minutes = int(request.args.get('timeout_minutes', 10))
+        stats = fetch_stats(timeout_minutes=timeout_minutes)
+        return jsonify({"status": "success", "data": stats}), 200
+    except Exception as e:
+        print(f"Error fetching telemetry stats: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_telemetry_sessions():
+    from flask import request
+    from services.telemetry_service import get_admin_sessions
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        search = request.args.get('search', '').strip()
+        status_filter = request.args.get('status', 'all').strip()
+        timeout_minutes = int(request.args.get('timeout_minutes', 10))
+
+        data = get_admin_sessions(page=page, page_size=page_size, search=search, status_filter=status_filter, timeout_minutes=timeout_minutes)
+        return jsonify({"status": "success", "data": data}), 200
+    except Exception as e:
+        print(f"Error fetching telemetry sessions: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_telemetry_events():
+    from flask import request
+    from services.telemetry_service import get_admin_events
+    try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 25))
+        search = request.args.get('search', '').strip()
+        session_id = request.args.get('session_id', '').strip()
+        user_id = request.args.get('user_id', '').strip()
+        category = request.args.get('category', 'all').strip()
+        status = request.args.get('status', 'all').strip()
+
+        data = get_admin_events(page=page, page_size=page_size, search=search, session_id=session_id, user_id=user_id, category=category, status=status)
+        return jsonify({"status": "success", "data": data}), 200
+    except Exception as e:
+        print(f"Error fetching telemetry events: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def get_session_timeline(session_id):
+    from services.telemetry_service import get_session_timeline as fetch_timeline
+    try:
+        timeline = fetch_timeline(session_id)
+        if not timeline:
+            return jsonify({"status": "error", "message": "Session not found"}), 404
+        return jsonify({"status": "success", "data": timeline}), 200
+    except Exception as e:
+        print(f"Error fetching session timeline: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def track_client_event():
+    from flask import request
+    from services.telemetry_service import record_event
+    try:
+        payload = request.get_json(silent=True) or {}
+        session_id = payload.get('session_id') or request.headers.get('x-session-id')
+        if not session_id:
+            return jsonify({"status": "error", "message": "session_id required"}), 400
+
+        user_id = payload.get('user_id')
+        if not user_id:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                try:
+                    from utils.security import decode_token
+                    decoded = decode_token(auth_header.split(" ", 1)[1])
+                    user_id = decoded.get("sub")
+                except Exception:
+                    pass
+
+        event_name = payload.get('event_name', 'USER_ACTION')
+        event_category = payload.get('event_category', 'CLIENT')
+        input_payload = payload.get('input_payload')
+        status = payload.get('status', 'SUCCESS')
+        result_summary = payload.get('result_summary')
+        execution_time_ms = payload.get('execution_time_ms', 0)
+        error_message = payload.get('error_message')
+        from services.telemetry_service import get_client_ip
+        ip_address = get_client_ip(request, payload=payload)
+        user_agent = request.headers.get('User-Agent')
+
+        record_event(
+            session_id=session_id,
+            event_name=event_name,
+            event_category=event_category,
+            user_id=user_id,
+            input_payload=input_payload,
+            status=status,
+            result_summary=result_summary,
+            execution_time_ms=execution_time_ms,
+            error_message=error_message,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
+        return jsonify({"status": "success", "message": "Event recorded"}), 200
+    except Exception as e:
+        print(f"Error in track_client_event: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500

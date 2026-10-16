@@ -15,6 +15,8 @@ def _get_cache_key(profile: dict, panchang: dict) -> str:
     return f"{profile_id}_{date_str}"
 
 def calculate_ephemeris_panchang():
+    import time
+    start_time = time.time()
     data = request.json
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
@@ -31,12 +33,31 @@ def calculate_ephemeris_panchang():
 
     try:
         result = calculate_panchang_data(date_str, time_str, float(tz_offset), float(lat), float(lon), int(mulank))
+        session_id = request.headers.get("x-session-id")
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="PANCHANG_CALCULATION",
+                    event_category="ASTROLOGY",
+                    input_payload={"date": date_str, "time": time_str, "lat": lat, "lon": lon},
+                    status="SUCCESS",
+                    result_summary={"tithi": (result or {}).get("tithi"), "nakshatra": (result or {}).get("nakshatra")},
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
         return jsonify({"status": "success", "data": result})
     except Exception as e:
         print(f"Error in calculate_ephemeris_panchang: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def daily_horoscope():
+    import time
+    start_time = time.time()
     data = request.json
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
@@ -66,6 +87,25 @@ def daily_horoscope():
         insights = json.loads(json_res)
         with _cache_lock:
             DAILY_HOROSCOPE_CACHE[cache_key] = insights
+
+        session_id = request.headers.get("x-session-id")
+        if session_id:
+            try:
+                from services.telemetry_service import record_event
+                record_event(
+                    session_id=session_id,
+                    event_name="DAILY_HOROSCOPE_GENERATION",
+                    event_category="AI_CHAT",
+                    input_payload={"name": profile.get("fullName"), "rashi": profile.get("horoscopeSystem")},
+                    status="SUCCESS",
+                    result_summary={"engine": active_engine, "summary": (insights.get("summary") or "")[:150]},
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent")
+                )
+            except Exception:
+                pass
+
         return jsonify({
             "status": "success",
             "insights": insights,
@@ -75,3 +115,4 @@ def daily_horoscope():
     except Exception as e:
         print(f"Error in daily_horoscope: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
