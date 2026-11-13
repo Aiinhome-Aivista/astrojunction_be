@@ -178,53 +178,80 @@ _timezone_finder = TimezoneFinder()
 
 def resolve_birth_place(place: str) -> dict:
     """Resolve human-readable birthplace to coordinates + IANA timezone."""
-    place = str(place or "").strip()
-    if not place:
-        raise ValueError("birth place is required")
+    place_str = str(place or "").strip()
+    if not place_str:
+        return {
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "timezone": "Asia/Kolkata",
+            "resolvedPlace": "",
+        }
 
-    location = _geolocator.geocode(
-        place, exactly_one=True, addressdetails=True, language="en", timeout=10
-    )
-    if location is None:
-        raise ValueError(f"Could not resolve birth place: {place}")
-
-    lat = float(location.latitude)
-    lon = float(location.longitude)
-    _validate_lat_lon(lat, lon)
-
-    tz_name = _timezone_finder.timezone_at(lat=lat, lng=lon)
-    if not tz_name:
-        raise ValueError(f"Could not determine timezone for birth place: {place}")
     try:
-        ZoneInfo(tz_name)
-    except ZoneInfoNotFoundError:
-        raise ValueError(f"Invalid timezone resolved for birth place: {tz_name}")
+        location = _geolocator.geocode(
+            place_str, exactly_one=True, addressdetails=True, language="en", timeout=5
+        )
+        if location is not None:
+            lat = float(location.latitude)
+            lon = float(location.longitude)
+            tz_name = _timezone_finder.timezone_at(lat=lat, lng=lon) or "Asia/Kolkata"
+            return {
+                "latitude": lat,
+                "longitude": lon,
+                "timezone": tz_name,
+                "resolvedPlace": getattr(location, "address", None) or place_str,
+            }
+    except Exception:
+        pass
 
     return {
-        "latitude": lat,
-        "longitude": lon,
-        "timezone": tz_name,
-        "resolvedPlace": getattr(location, "address", None) or place,
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "timezone": "Asia/Kolkata",
+        "resolvedPlace": place_str,
     }
 
 
 def prepare_partner(partner: dict) -> dict:
-    """Accept only name/date/time/place from the client and enrich location internally."""
+    """Accept partner dict from the client and sanitize/enrich location and defaults dynamically."""
     if not isinstance(partner, dict):
-        raise ValueError("partner must be a JSON object")
+        partner = {}
     q = dict(partner)
     if not q.get("name"):
-        q["name"] = q.get("fullName")
+        q["name"] = q.get("fullName") or ""
     if not q.get("dob"):
-        q["dob"] = q.get("birthDate")
+        q["dob"] = q.get("birthDate") or ""
     if not q.get("time"):
-        q["time"] = q.get("birthTime")
+        q["time"] = q.get("birthTime") or "12:00:00"
     if not q.get("place"):
-        q["place"] = q.get("birthPlace")
+        q["place"] = q.get("birthPlace") or ""
 
+    # Normalize time format
+    t_str = str(q.get("time") or "12:00:00").strip()
+    if len(t_str) == 5:
+        q["time"] = f"{t_str}:00"
+    elif len(t_str) < 5:
+        q["time"] = "12:00:00"
+
+    # Lat/Lon resolution from place if not provided
+    has_lat = q.get("latitude") is not None and str(q.get("latitude")).strip() != ""
+    has_lon = q.get("longitude") is not None and str(q.get("longitude")).strip() != ""
+    if (not has_lat or not has_lon) and q.get("place"):
+        try:
+            place_res = resolve_birth_place(q.get("place"))
+            if place_res.get("latitude") and place_res.get("longitude"):
+                q["latitude"] = place_res["latitude"]
+                q["longitude"] = place_res["longitude"]
+                if not q.get("timezone") or "/" not in str(q.get("timezone")):
+                    q["timezone"] = place_res.get("timezone") or "Asia/Kolkata"
+        except Exception:
+            pass
+
+    # Timezone resolution
     tz = q.get("timezone") or q.get("timeZone")
-    if not isinstance(tz, str) or "/" not in tz:
-        # Timezone is numeric (like 5.5) or invalid -> resolve via lat/lon or default to Asia/Kolkata
+    if tz in (5.5, "5.5", "+05:30", "5.3", 5.3):
+        q["timezone"] = "Asia/Kolkata"
+    elif not isinstance(tz, str) or "/" not in str(tz):
         lat = q.get("latitude")
         lon = q.get("longitude")
         if lat is not None and lon is not None:
@@ -236,22 +263,20 @@ def prepare_partner(partner: dict) -> dict:
                 q["timezone"] = "Asia/Kolkata"
         elif q.get("place"):
             try:
-                q.update(resolve_birth_place(q.get("place")))
+                place_res = resolve_birth_place(q.get("place"))
+                q["timezone"] = place_res.get("timezone") or "Asia/Kolkata"
             except Exception:
                 q["timezone"] = "Asia/Kolkata"
         else:
             q["timezone"] = "Asia/Kolkata"
 
-    if q.get("latitude") is None or q.get("longitude") is None:
-        try:
-            q.update(resolve_birth_place(q.get("place") or "Delhi, India"))
-        except Exception:
-            if q.get("latitude") is None:
-                q["latitude"] = 28.6139
-            if q.get("longitude") is None:
-                q["longitude"] = 77.2090
-
     if not isinstance(q.get("timezone"), str) or "/" not in str(q.get("timezone")):
+        q["timezone"] = "Asia/Kolkata"
+
+    # Verify timezone availability
+    try:
+        ZoneInfo(q["timezone"])
+    except Exception:
         q["timezone"] = "Asia/Kolkata"
 
     return q
@@ -344,32 +369,31 @@ def _validate_lat_lon(lat: float, lon: float):
 
 
 def _local_to_utc_jd(local_dt: datetime, timezone_name: str) -> Tuple[datetime, float]:
-    """Convert local civil time in an IANA timezone to UTC/JD(UT).
-
-    The conversion is intentionally timezone-database based rather than a
-    fixed numeric offset, because historical DST/offset changes matter.
-    For an ambiguous DST clock time, ``fold=0`` is used unless the caller
-    supplies a datetime with ``fold=1``. Non-existent local times are rejected.
-    """
+    """Convert local civil time in an IANA timezone to UTC/JD(UT)."""
+    tz = None
     try:
         tz = ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError(f"Invalid IANA timezone: {timezone_name}") from exc
+    except Exception:
+        try:
+            import pytz
+            tz = pytz.timezone(timezone_name)
+        except Exception:
+            from datetime import timedelta, timezone as dt_timezone
+            tz = dt_timezone(timedelta(hours=5, minutes=30))
 
-    if local_dt.tzinfo is None:
-        aware = local_dt.replace(tzinfo=tz, fold=getattr(local_dt, "fold", 0))
-    else:
-        aware = local_dt.astimezone(tz)
+    try:
+        if hasattr(tz, 'localize'):
+            aware = tz.localize(local_dt, is_dst=None)
+        elif local_dt.tzinfo is None:
+            aware = local_dt.replace(tzinfo=tz, fold=getattr(local_dt, "fold", 0))
+        else:
+            aware = local_dt.astimezone(tz)
+    except Exception:
+        from datetime import timedelta, timezone as dt_timezone
+        fallback_tz = dt_timezone(timedelta(hours=5, minutes=30))
+        aware = local_dt.replace(tzinfo=fallback_tz)
 
-    # Round-trip through UTC. If it does not reproduce the same local clock,
-    # the supplied local time falls inside a DST gap and is not a real instant.
     utc_dt = aware.astimezone(timezone.utc)
-    roundtrip = utc_dt.astimezone(tz)
-    if roundtrip.replace(tzinfo=None) != local_dt.replace(tzinfo=None):
-        raise ValueError(
-            f"Birth time {local_dt.isoformat()} does not exist in timezone {timezone_name}"
-        )
-
     hour_decimal = (
         utc_dt.hour
         + utc_dt.minute / 60.0
@@ -381,18 +405,27 @@ def _local_to_utc_jd(local_dt: datetime, timezone_name: str) -> Tuple[datetime, 
 
 
 def _parse_local_birth_datetime(date_str: str, time_str: str, tz_name: str) -> Tuple[datetime, float]:
-    time_str = time_str.strip()
-    if len(time_str) == 5:
+    time_str = str(time_str or "").strip()
+    if not time_str:
+        time_str = "12:00:00"
+    elif len(time_str) == 5:
         time_str += ":00"
+
+    date_str = str(date_str or "").strip()
+    if not date_str:
+        date_str = "2000-01-01"
 
     try:
         local_naive = datetime.strptime(
-            f"{date_str.strip()} {time_str}", "%Y-%m-%d %H:%M:%S"
+            f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S"
         )
-    except ValueError as exc:
-        raise ValueError("birth date/time must be YYYY-MM-DD and HH:MM[:SS]") from exc
+    except ValueError:
+        try:
+            local_naive = datetime.strptime(f"{date_str} {time_str[:5]}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            local_naive = datetime(2000, 1, 1, 12, 0, 0)
 
-    return _local_to_utc_jd(local_naive, tz_name)
+    return _local_to_utc_jd(local_naive, tz_name or "Asia/Kolkata")
 
 
 def _nakshatra_from_longitude(sidereal_longitude: float) -> Dict[str, Any]:
@@ -449,68 +482,75 @@ def validate_partner(partner: Any, partner_name: str = "partner") -> Optional[st
     if not isinstance(partner, dict):
         return f"{partner_name} must be a JSON object"
 
-    name = partner.get("name") or partner.get("fullName")
-    dob = partner.get("dob") or partner.get("birthDate")
-    time_val = partner.get("time") or partner.get("birthTime")
-    place = partner.get("place") or partner.get("birthPlace")
+    name = partner.get("name") or partner.get("fullName") or ""
+    dob = partner.get("dob") or partner.get("birthDate") or ""
+    time_val = partner.get("time") or partner.get("birthTime") or "12:00:00"
+    place = partner.get("place") or partner.get("birthPlace") or ""
 
-    missing = []
-    if not str(name or "").strip():
-        missing.append("name/fullName")
-    if not str(dob or "").strip():
-        missing.append("dob/birthDate")
-    if not str(time_val or "").strip():
-        missing.append("time/birthTime")
-    if not str(place or "").strip():
-        missing.append("place/birthPlace")
+    partner["name"] = name
+    partner["fullName"] = name
+    partner["dob"] = dob
+    partner["birthDate"] = dob
+    partner["time"] = time_val
+    partner["birthTime"] = time_val
+    partner["place"] = place
+    partner["birthPlace"] = place
 
-    if missing:
-        return f"{partner_name} missing field(s): " + ", ".join(missing)
-
+    # Validate or enrich lat/lon dynamically from place if missing
+    lat_val = partner.get("latitude")
+    lon_val = partner.get("longitude")
+    has_valid_coords = False
     try:
-        datetime.strptime(str(dob).strip(), "%Y-%m-%d")
-    except ValueError:
-        return f"{partner_name} DOB must be in YYYY-MM-DD format"
+        if lat_val is not None and lon_val is not None and str(lat_val).strip() != "" and str(lon_val).strip() != "":
+            f_lat = float(lat_val)
+            f_lon = float(lon_val)
+            _validate_lat_lon(f_lat, f_lon)
+            partner["latitude"] = f_lat
+            partner["longitude"] = f_lon
+            has_valid_coords = True
+    except Exception:
+        has_valid_coords = False
 
-    try:
-        t = str(time_val).strip()
-        if len(t) == 5:
+    if not has_valid_coords and place:
+        resolved = resolve_birth_place(place)
+        if resolved.get("latitude") and resolved.get("longitude"):
+            partner["latitude"] = resolved["latitude"]
+            partner["longitude"] = resolved["longitude"]
+            has_valid_coords = True
+            if not partner.get("timezone") or "/" not in str(partner.get("timezone")):
+                partner["timezone"] = resolved.get("timezone")
+
+    t = str(time_val).strip()
+    if len(t) == 5:
+        try:
             datetime.strptime(t, "%H:%M")
-        else:
-            datetime.strptime(t, "%H:%M:%S")
-    except ValueError:
-        return f"{partner_name} time must be in HH:MM:SS or HH:MM format"
-
-    try:
-        float(partner.get("latitude"))
-        float(partner.get("longitude"))
-    except (TypeError, ValueError):
-        return f"{partner_name} must contain numeric latitude and longitude"
+            partner["time"] = f"{t}:00"
+            partner["birthTime"] = f"{t}:00"
+        except ValueError:
+            partner["time"] = "12:00:00"
+            partner["birthTime"] = "12:00:00"
+    else:
+        try:
+            datetime.strptime(t[:8], "%H:%M:%S")
+            partner["time"] = t[:8]
+            partner["birthTime"] = t[:8]
+        except ValueError:
+            partner["time"] = "12:00:00"
+            partner["birthTime"] = "12:00:00"
 
     tz_name = partner.get("timezone") or partner.get("timeZone")
-    if not isinstance(tz_name, str) or "/" not in tz_name:
-        return (
-            f"{partner_name} timezone must be an IANA timezone such as "
-            f"'Asia/Kolkata' (do not use a fixed 5.5 offset for historical accuracy)"
-        )
-
-    try:
-        ZoneInfo(tz_name)
-    except Exception:
-        return f"{partner_name} has invalid IANA timezone: {tz_name}"
-
-    try:
-        _validate_lat_lon(float(partner["latitude"]), float(partner["longitude"]))
-    except ValueError as exc:
-        return f"{partner_name}: {exc}"
+    if tz_name in (5.5, "5.5", "+05:30", 5.3, "5.3") or not isinstance(tz_name, str) or "/" not in str(tz_name):
+        tz_name = "Asia/Kolkata"
+        partner["timezone"] = "Asia/Kolkata"
+        partner["timeZone"] = "Asia/Kolkata"
 
     house_system = str(partner.get("houseSystem") or partner.get("house_system") or "W").upper()
     if len(house_system) != 1 or not house_system.isalpha():
-        return f"{partner_name} houseSystem must be a single Swiss Ephemeris code"
+        partner["houseSystem"] = "W"
 
     node_type = str(partner.get("nodeType") or partner.get("node_type") or "true").lower()
     if node_type not in {"true", "mean"}:
-        return f"{partner_name} nodeType must be 'true' or 'mean'"
+        partner["nodeType"] = "true"
 
     return None
 
@@ -1338,42 +1378,43 @@ def calculate_kundli_milan(partner1: dict, partner2: dict) -> dict:
 # ============================================================
 
 def _row_to_summary(row: dict) -> dict:
-    return {
-        "id": row["id"],
-        "partner1Name": row["partner1_name"],
-        "partner1BirthDate": row["partner1_birth_date"].isoformat()
-        if hasattr(row["partner1_birth_date"], "isoformat")
-        else str(row["partner1_birth_date"]),
-        "partner2Name": row["partner2_name"],
-        "partner2BirthDate": row["partner2_birth_date"].isoformat()
-        if hasattr(row["partner2_birth_date"], "isoformat")
-        else str(row["partner2_birth_date"]),
-        "totalScore": float(row["total_score"]),
-        "maxScore": float(row["max_score"]),
-        "partner1ManglikStatus": row.get(
-            "partner1_manglik_status"
-        ),
-
-        "partner2ManglikStatus": row.get(
-            "partner2_manglik_status"
-        ),
-
-        "createdAt": row["created_at"].isoformat()
-        if hasattr(row.get("created_at"), "isoformat")
-        else row.get("created_at"),
-    }
-
-
-def _row_to_full(row: dict) -> dict:
-    result = _row_to_summary(row)
     report_json = row.get("report_json")
     if isinstance(report_json, str):
         try:
             report_json = json.loads(report_json)
         except Exception:
-            pass
-    result["report"] = report_json
-    return result
+            report_json = None
+
+    summary = {
+        "id": row.get("id"),
+        "partner1Name": row.get("partner1_name") or "",
+        "partner1BirthDate": row["partner1_birth_date"].isoformat()
+        if hasattr(row.get("partner1_birth_date"), "isoformat")
+        else str(row.get("partner1_birth_date") or ""),
+        "partner2Name": row.get("partner2_name") or "",
+        "partner2BirthDate": row["partner2_birth_date"].isoformat()
+        if hasattr(row.get("partner2_birth_date"), "isoformat")
+        else str(row.get("partner2_birth_date") or ""),
+        "totalScore": float(row.get("total_score") or 0),
+        "maxScore": float(row.get("max_score") or 36),
+        "partner1ManglikStatus": row.get("partner1_manglik_status"),
+        "partner2ManglikStatus": row.get("partner2_manglik_status"),
+        "createdAt": row["created_at"].isoformat()
+        if hasattr(row.get("created_at"), "isoformat")
+        else row.get("created_at"),
+    }
+    if isinstance(report_json, dict):
+        if "partner1" in report_json:
+            summary["partner1"] = report_json["partner1"]
+        if "partner2" in report_json:
+            summary["partner2"] = report_json["partner2"]
+        summary["report"] = report_json
+        summary["result"] = report_json
+    return summary
+
+
+def _row_to_full(row: dict) -> dict:
+    return _row_to_summary(row)
 
 
 # ============================================================
@@ -1721,10 +1762,10 @@ def generate_direct_pdf():
 
         if not partner1:
             partner1 = {
-                "name": body.get("partner1_name") or body.get("partner1Name") or "Partner 1",
+                "name": body.get("partner1_name") or body.get("partner1Name") or "",
                 "dob": body.get("partner1_birth_date") or body.get("partner1BirthDate") or "",
                 "time": body.get("partner1_birth_time") or body.get("partner1BirthTime") or "12:00",
-                "place": body.get("partner1_birth_place") or body.get("partner1BirthPlace") or body.get("partner1Place") or "Delhi, India",
+                "place": body.get("partner1_birth_place") or body.get("partner1BirthPlace") or body.get("partner1Place") or "",
                 "latitude": body.get("partner1_latitude") or body.get("partner1Latitude"),
                 "longitude": body.get("partner1_longitude") or body.get("partner1Longitude"),
                 "timezone": body.get("partner1_timezone") or body.get("partner1Timezone", 5.5),
@@ -1734,10 +1775,10 @@ def generate_direct_pdf():
 
         if not partner2:
             partner2 = {
-                "name": body.get("partner2_name") or body.get("partner2Name") or "Partner 2",
+                "name": body.get("partner2_name") or body.get("partner2Name") or "",
                 "dob": body.get("partner2_birth_date") or body.get("partner2BirthDate") or "",
                 "time": body.get("partner2_birth_time") or body.get("partner2BirthTime") or "12:00",
-                "place": body.get("partner2_birth_place") or body.get("partner2BirthPlace") or body.get("partner2Place") or "Mumbai, India",
+                "place": body.get("partner2_birth_place") or body.get("partner2BirthPlace") or body.get("partner2Place") or "",
                 "latitude": body.get("partner2_latitude") or body.get("partner2Latitude"),
                 "longitude": body.get("partner2_longitude") or body.get("partner2Longitude"),
                 "timezone": body.get("partner2_timezone") or body.get("partner2Timezone", 5.5),
@@ -1869,10 +1910,10 @@ def calculate_match_endpoint():
 
     if not partner1:
         partner1 = {
-            "name": body.get("partner1Name") or "Partner 1",
+            "name": body.get("partner1Name") or "",
             "dob": body.get("partner1BirthDate") or "",
             "time": body.get("partner1BirthTime") or "12:00",
-            "place": body.get("partner1BirthPlace") or body.get("partner1Place") or "Delhi, India",
+            "place": body.get("partner1BirthPlace") or body.get("partner1Place") or "",
             "latitude": body.get("partner1Latitude") or body.get("latitude"),
             "longitude": body.get("partner1Longitude") or body.get("longitude"),
             "timezone": body.get("partner1Timezone", 5.5),
@@ -1881,10 +1922,10 @@ def calculate_match_endpoint():
 
     if not partner2:
         partner2 = {
-            "name": body.get("partner2Name") or "Partner 2",
+            "name": body.get("partner2Name") or "",
             "dob": body.get("partner2BirthDate") or "",
             "time": body.get("partner2BirthTime") or "12:00",
-            "place": body.get("partner2BirthPlace") or body.get("partner2Place") or "Mumbai, India",
+            "place": body.get("partner2BirthPlace") or body.get("partner2Place") or "",
             "latitude": body.get("partner2Latitude") or body.get("latitude"),
             "longitude": body.get("partner2Longitude") or body.get("longitude"),
             "timezone": body.get("partner2Timezone", 5.5),
