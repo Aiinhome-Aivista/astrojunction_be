@@ -451,26 +451,46 @@ _email_scheduler_lock = threading.Lock()
 
 def _email_scheduler_worker():
     """
-    Background daemon thread:
-    - Polls every 10 minutes (600s) starting at 06:00 IST.
-    - Stops sending after 10:00 IST (DAILY_EMAIL_CUTOFF_HOUR).
-    - Checks subscriber sign readiness and retries unsent subscribers on subsequent polls.
+    Background worker:
+    Runs one-time verification on server startup: checks if within morning window (06:00 - 10:00 IST),
+    dispatches daily emails to unsent subscribers if applicable, and terminates.
     """
     config = get_daily_email_scheduler_config()
-    print(f"[Daily Email Scheduler] Daemon initialized. Poll window: {config['start_hour']:02d}:00 - {config['cutoff_hour']:02d}:00 IST, interval: {config['check_interval']}s.")
+    print(f"[Daily Email Scheduler] Background thread initialized (Window: {config['start_hour']:02d}:00 - {config['cutoff_hour']:02d}:00 IST).")
     time.sleep(6)
 
+    try:
+        now_ist = get_now_ist()
+        today_date = now_ist.date()
+        if config["start_hour"] <= now_ist.hour < config["cutoff_hour"]:
+            send_daily_emails_to_all_subscribers(force=False, current_time_ist=now_ist)
+        elif now_ist.hour >= config["cutoff_hour"]:
+            print(f"[Daily Email Scheduler] Cutoff hour ({config['cutoff_hour']}:00 IST) has passed for {today_date}. Email dispatch window closed for today.")
+        else:
+            print(f"[Daily Email Scheduler] Current IST time ({now_ist.strftime('%H:%M:%S')}) is before morning window ({config['start_hour']:02d}:00 IST).")
+    except Exception as e:
+        print(f"[Daily Email Scheduler] Worker execution error: {e}")
+
+    # Single-run mode: defaults to True so email scheduler runs only one time per server start
+    run_once = os.getenv("DAILY_EMAIL_RUN_ONCE", "true").lower() in ("true", "1", "yes")
+    if run_once:
+        print("[Daily Email Scheduler] One-time execution completed successfully. Scheduler thread stopped.")
+        return
+
+    last_cutoff_logged_date = None
     while True:
         config = get_daily_email_scheduler_config()
         sleep_seconds = config["check_interval"]
         try:
             now_ist = get_now_ist()
+            today_date = now_ist.date()
             # Send daily emails during 06:00 IST - 10:00 IST morning window
             if config["start_hour"] <= now_ist.hour < config["cutoff_hour"]:
                 send_daily_emails_to_all_subscribers(force=False, current_time_ist=now_ist)
             elif now_ist.hour >= config["cutoff_hour"]:
-                # Past cutoff check: logs skipped count once
-                send_daily_emails_to_all_subscribers(force=False, current_time_ist=now_ist)
+                if last_cutoff_logged_date != today_date:
+                    print(f"[Daily Email Scheduler] Cutoff hour reached ({config['cutoff_hour']}:00 IST) for {today_date}. Email dispatch window closed for today.")
+                    last_cutoff_logged_date = today_date
             time.sleep(sleep_seconds)
         except Exception as e:
             print(f"[Daily Email Scheduler] Worker loop error: {e}")

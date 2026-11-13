@@ -820,7 +820,7 @@ def get_daily_scheduler_config() -> dict:
 
 def _scheduler_worker():
     config = get_daily_scheduler_config()
-    print(f"[Daily Insights Scheduler] Background daemon thread initialized. Scheduled daily time: {config['time_str']}, check interval: {config['check_interval']}s.")
+    print(f"[Daily Insights Scheduler] Background thread initialized. Running one-time startup check (Configured daily time: {config['time_str']}).")
 
     # Run initial check after a brief server startup delay (4 seconds)
     time.sleep(4)
@@ -837,6 +837,12 @@ def _scheduler_worker():
     except Exception as e:
         print(f"[Daily Insights Scheduler] Startup check encountered exception: {e}")
 
+    # Single-run mode: defaults to True so scheduler runs only one time per server start
+    run_once = os.getenv("DAILY_INSIGHTS_RUN_ONCE", "true").lower() in ("true", "1", "yes")
+    if run_once:
+        print("[Daily Insights Scheduler] One-time execution completed successfully. Scheduler thread stopped.")
+        return
+
     last_scheduled_date_run = None
     # If today already has full data at startup, record today's date as processed for the scheduled daily batch
     try:
@@ -846,7 +852,7 @@ def _scheduler_worker():
     except Exception:
         pass
 
-    # Continuous loop: monitors time and triggers fresh daily LLM fetch at the configured time from .env
+    # Continuous loop: only runs when DAILY_INSIGHTS_RUN_ONCE=false is set in .env
     while True:
         config = get_daily_scheduler_config()
         sleep_seconds = config["check_interval"]
@@ -879,11 +885,22 @@ def _scheduler_worker():
                     ensure_yearly_insights_ready(target_year=today_date.year, force=True)
                 last_scheduled_date_run = today_date
             else:
-                # Passive check: ensure all 12 signs have entries in DB for today, current week, current month, and current year
-                fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
-                ensure_weekly_insights_ready(target_date=today_date, force=False)
-                ensure_monthly_insights_ready(target_date=today_date, force=False)
-                ensure_yearly_insights_ready(target_year=today_date.year, force=False)
+                # Passive check: ONLY if today's rows are incomplete in DB (< 192 rows), then trigger catch-up
+                try:
+                    conn = get_db_connection()
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("SELECT COUNT(*) FROM `horoscopes` WHERE `period` = 'daily' AND `period_start` = %s;", (today_date,))
+                        cnt = cur.fetchone()[0]
+                        cur.close()
+                    finally:
+                        conn.close()
+
+                    if cnt < 192:
+                        print(f"[Daily Insights Scheduler] Incomplete daily rows detected ({cnt}/192). Generating missing rows...")
+                        fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
+                except Exception as check_err:
+                    print(f"[Daily Insights Scheduler] Passive check error: {check_err}")
         except Exception as e:
             print(f"[Daily Insights Scheduler] Loop error: {e}")
 
