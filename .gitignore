@@ -1,7 +1,11 @@
 venv
 env
 .env
-__pycache__
+__pycache__/
+*.pyc
+failed.json
+*.log
+.pytest_cache/
 *.xlsx
 /lib
 *.zip

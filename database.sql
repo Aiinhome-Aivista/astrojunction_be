@@ -652,3 +652,79 @@ CREATE TABLE IF NOT EXISTS user_event_logs (
   INDEX idx_events_status (status),
   INDEX idx_events_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS daily_update_subscriptions (
+  id                   INT           AUTO_INCREMENT PRIMARY KEY,
+  email                VARCHAR(255)  NOT NULL,
+  zodiac_sign          VARCHAR(50)   NOT NULL,
+  preferred_categories JSON          NULL,
+  is_active            TINYINT(1)    NOT NULL DEFAULT 1,
+  last_sent_date       DATE          NULL,
+  created_at           TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_daily_sub_email (email),
+  INDEX idx_daily_sub_sign (zodiac_sign),
+  UNIQUE KEY uq_email_zodiac (email, zodiac_sign)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `horoscopes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `sign` VARCHAR(30) NOT NULL,
+  `system` VARCHAR(20) NOT NULL,
+  `period` VARCHAR(20) NOT NULL,
+  `category` VARCHAR(30) NOT NULL,
+  `period_start` DATE NOT NULL,
+  `period_end` DATE NOT NULL,
+  `text` MEDIUMTEXT NOT NULL,
+  `score` SMALLINT NOT NULL DEFAULT 80,
+  `lucky_time` VARCHAR(255) NULL,
+  `remedy` TEXT NULL,
+  `affirmation` TEXT NULL,
+  `tip_for_the_day` VARCHAR(300) NULL,
+  `planetary_snapshot` JSON NULL,
+  `model` VARCHAR(100) NULL,
+  `generated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  
+  CONSTRAINT `chk_horoscope_system` CHECK (`system` IN ('tropical', 'sidereal')),
+  CONSTRAINT `chk_horoscope_period` CHECK (`period` IN ('daily', 'weekly', 'monthly', 'yearly')),
+  CONSTRAINT `chk_horoscope_category` CHECK (`category` IN (
+    'cosmic_pulse', 'health', 'wealth', 'relationship', 
+    'love_line', 'education', 'professional', 'travel',
+    'career', 'love_life'
+  )),
+  CONSTRAINT `chk_horoscope_score` CHECK (`score` BETWEEN 0 AND 100),
+  
+  UNIQUE KEY `uq_sign_system_period_cat_start` (`sign`, `system`, `period`, `category`, `period_start`),
+  INDEX `idx_horoscope_lookup` (`sign`, `system`, `period`, `category`, `period_start` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `scheduler_runs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `job_name` VARCHAR(50) NOT NULL,
+  `run_date` DATE NOT NULL,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'running',
+  `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `completed_at` TIMESTAMP NULL,
+  `details` TEXT NULL,
+  UNIQUE KEY `uq_job_run_date` (`job_name`, `run_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `month_ingresses` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `year` INT NOT NULL,
+  `month` INT NOT NULL,
+  `system` VARCHAR(20) NOT NULL,
+  `planet` VARCHAR(50) NOT NULL,
+  `from_sign` VARCHAR(50) NULL,
+  `to_sign` VARCHAR(50) NOT NULL,
+  `event_date` DATE NOT NULL,
+  `event_time` VARCHAR(20) NULL,
+  `event_type` ENUM('ingress', 'retrograde', 'direct') NOT NULL,
+  `details` JSON NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_month_ingress_event` (`year`, `month`, `system`, `planet`, `event_type`, `event_date`),
+  INDEX `idx_month_ingresses_lookup` (`year`, `month`, `system`),
+  CONSTRAINT `chk_ingress_system` CHECK (`system` IN ('tropical', 'sidereal'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+

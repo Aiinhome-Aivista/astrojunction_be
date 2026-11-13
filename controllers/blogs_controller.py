@@ -27,7 +27,12 @@ def _get_unique_slug(cursor, title: str, blog_id: int = 0) -> str:
 
 def ensure_slug_schema():
     """Ensure slug column exists in blogs table and populate any missing slugs."""
-    conn = get_db_connection()
+    try:
+        conn = get_db_connection()
+    except Exception as e:
+        print(f"Slug schema check connection error: {e}")
+        return
+
     if not conn:
         return
     try:

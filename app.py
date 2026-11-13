@@ -1,4 +1,5 @@
 # AstroJunction Backend API Server
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -53,6 +54,58 @@ def get_all_zodiacs():
 @app.route("/zodiac/compatibility", methods=["POST"])
 def zodiac_compatibility():
     return global_zodiac_controller.zodiac_compatibility()
+
+@app.route("/subscribe", methods=["POST"])
+@app.route("/api/subscribe", methods=["POST"])
+@app.route("/api/zodiac/subscribe", methods=["POST"])
+@app.route("/zodiac/daily-update-subscribe", methods=["POST"])
+@app.route("/api/zodiac/daily-update-subscribe", methods=["POST"])
+def daily_update_subscribe():
+    return global_zodiac_controller.subscribe_daily_update()
+
+@app.route("/zodiac/daily-category-insight", methods=["GET", "POST"])
+@app.route("/api/zodiac/daily-category-insight", methods=["GET", "POST"])
+def daily_category_insight():
+    return global_zodiac_controller.get_daily_category_insight()
+
+@app.route("/api/zodiac/refresh-daily-insights", methods=["GET", "POST"])
+def refresh_daily_insights():
+    return global_zodiac_controller.refresh_daily_insights()
+
+@app.route("/api/zodiac/send-daily-emails", methods=["GET", "POST"])
+def send_daily_emails():
+    return global_zodiac_controller.trigger_daily_email_dispatch()
+
+# ==========================================
+# MULTI-SYSTEM HOROSCOPE API (Option B)
+# ==========================================
+from controllers import horoscope_controller
+
+@app.route("/api/horoscope", methods=["GET"])
+@app.route("/horoscope", methods=["GET"])
+def get_multi_system_horoscope():
+    return horoscope_controller.get_horoscope()
+
+@app.route("/api/horoscope/health", methods=["GET"])
+def get_horoscope_health():
+    return horoscope_controller.horoscope_health()
+
+@app.route("/api/horoscope/vitality", methods=["GET"])
+def get_horoscope_vitality():
+    return horoscope_controller.get_horoscope_vitality()
+
+@app.route("/api/horoscope/years", methods=["GET"])
+@app.route("/horoscope/years", methods=["GET"])
+def get_horoscope_years():
+    return horoscope_controller.get_horoscope_years()
+
+# Start background schedulers when running as main server or explicitly enabled
+if __name__ == "__main__" or os.environ.get("ENABLE_BACKGROUND_SCHEDULERS", "false").lower() == "true":
+    from services.daily_insights_scheduler import start_daily_insights_scheduler
+    start_daily_insights_scheduler()
+
+    from services.daily_email_scheduler import start_daily_email_scheduler
+    start_daily_email_scheduler()
 
 # 3. Panjika Calendar APIs (Landing Page)
 @app.route("/calendar/convert", methods=["POST"])
