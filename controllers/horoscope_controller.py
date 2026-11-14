@@ -15,6 +15,7 @@ VALID_SIGNS = [
 ]
 VALID_SYSTEMS = ["tropical", "sidereal"]
 VALID_PERIODS = ["daily", "weekly", "monthly", "yearly"]
+VALID_LANGUAGES = ["en", "hi", "bn", "ta", "fr"]
 VALID_CATEGORIES = [
     "all", "cosmic_pulse", "health", "wealth", "relationship",
     "love_line", "education", "professional", "travel",
@@ -35,6 +36,7 @@ def get_horoscope():
     system = (request.args.get("system") or "tropical").strip().lower()
     period = (request.args.get("period") or "daily").strip().lower()
     category = (request.args.get("category") or "all").strip().lower()
+    lang = (request.args.get("lang") or "en").strip().lower()
 
     if category == "career":
         category = "professional"
@@ -42,6 +44,12 @@ def get_horoscope():
         category = "love_line"
 
     # Validation
+    if lang not in VALID_LANGUAGES:
+        return jsonify({
+            "status": "error",
+            "message": f"Invalid lang '{lang}'. Allowed: {', '.join(VALID_LANGUAGES)}"
+        }), 400
+
     if sign not in VALID_SIGNS:
         return jsonify({
             "status": "error",
@@ -237,6 +245,23 @@ def get_horoscope():
                     "stale": is_stale
                 }), 404
 
+            # Dynamic translation for non-English languages
+            all_translated = True
+            if lang != "en":
+                from services.landing_translation import translate_items
+                items = translate_items(
+                    items,
+                    lang,
+                    {
+                        "sign": sign,
+                        "system": system,
+                        "period": period,
+                        "period_start": str(period_start),
+                        "period_end": str(period_end),
+                    }
+                )
+                all_translated = all(it.get("translated", True) for it in items)
+
             # Format response
             response_data = {
                 "status": "success",
@@ -245,6 +270,8 @@ def get_horoscope():
                 "period": period,
                 "period_start": str(period_start),
                 "period_end": str(period_end),
+                "lang": lang,
+                "translated": all_translated,
                 "items": items,
                 "stale": is_stale
             }
@@ -253,6 +280,7 @@ def get_horoscope():
 
             resp = make_response(jsonify(response_data))
             resp.headers["Cache-Control"] = "public, s-maxage=3600, stale-while-revalidate=86400"
+            resp.headers["Vary"] = "Accept-Encoding, lang"
             return resp
 
         finally:

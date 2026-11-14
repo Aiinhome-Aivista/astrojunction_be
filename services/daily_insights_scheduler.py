@@ -422,6 +422,12 @@ def fetch_and_store_daily_insights_for_all_signs(target_date: str = None, force:
         target_dt = datetime.strptime(target_date, "%Y-%m-%d").date() if isinstance(target_date, str) else target_date
         print(f"[Daily Insights Scheduler] Running batch horoscope generation (pyswisseph + Mistral) for {target_dt}...")
         run_batch_generation(period_mode="daily", target_date=target_dt, force=force)
+        # Background pre-warm Hindi & Bengali translations for landing page horoscope card
+        try:
+            from services.landing_translation import warm_up, PREWARM_LANGS
+            threading.Thread(target=warm_up, args=(["daily"], PREWARM_LANGS), daemon=True).start()
+        except Exception as w_err:
+            print(f"[Daily Insights Scheduler Warning] Pre-warm trigger error: {w_err}")
     except Exception as b_err:
         print(f"[Daily Insights Scheduler Warning] Batch generation encountered error: {b_err}")
 
@@ -547,6 +553,11 @@ def ensure_weekly_insights_ready(target_date: date = None, force: bool = False):
                         status="completed",
                         details=f"Generated: {summary.get('generated', 0)}, Skipped: {summary.get('skipped', 0)}, Failed: {summary.get('failed', 0)}"
                     )
+                    try:
+                        from services.landing_translation import warm_up, PREWARM_LANGS
+                        threading.Thread(target=warm_up, args=(["weekly"], PREWARM_LANGS), daemon=True).start()
+                    except Exception as w_err:
+                        print(f"[Daily Insights Scheduler Warning] Pre-warm trigger error (weekly): {w_err}")
                 except Exception as gen_err:
                     release_weekly_job_lock(monday, status="failed", details=str(gen_err)[:250])
                     raise gen_err
@@ -664,6 +675,11 @@ def ensure_monthly_insights_ready(target_date: date = None, force: bool = False)
                         status="completed",
                         details=f"Generated: {summary.get('generated', 0)}, Skipped: {summary.get('skipped', 0)}, Failed: {summary.get('failed', 0)}"
                     )
+                    try:
+                        from services.landing_translation import warm_up, PREWARM_LANGS
+                        threading.Thread(target=warm_up, args=(["monthly"], PREWARM_LANGS), daemon=True).start()
+                    except Exception as w_err:
+                        print(f"[Daily Insights Scheduler Warning] Pre-warm trigger error (monthly): {w_err}")
                 except Exception as gen_err:
                     release_monthly_job_lock(first_day, status="failed", details=str(gen_err)[:250])
                     raise gen_err
@@ -774,6 +790,11 @@ def ensure_yearly_insights_ready(target_year: int = None, force: bool = False):
                         status="completed",
                         details=f"Generated: {summary.get('generated', 0)}, Skipped: {summary.get('skipped', 0)}, Failed: {summary.get('failed', 0)}"
                     )
+                    try:
+                        from services.landing_translation import warm_up, PREWARM_LANGS
+                        threading.Thread(target=warm_up, args=(["yearly"], PREWARM_LANGS), daemon=True).start()
+                    except Exception as w_err:
+                        print(f"[Daily Insights Scheduler Warning] Pre-warm trigger error (yearly): {w_err}")
                 except Exception as gen_err:
                     release_yearly_job_lock(jan1, status="failed", details=str(gen_err)[:250])
                     raise gen_err

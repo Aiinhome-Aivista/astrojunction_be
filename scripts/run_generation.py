@@ -573,8 +573,245 @@ def run_batch_generation(
     return summary
 
 
+def run_translation_tests():
+    """
+    Automated Test Suite for Landing Horoscope Translation.
+    Validates:
+    1. lang=en never calls Mistral; unsupported lang returns 400.
+    2. Same request twice: the second is served from cache (Mistral call count stays 1).
+    3. 10 simultaneous requests for the same missing key trigger exactly 1 Mistral call.
+    4. Validator rejects wrong paragraph count, markdown, untranslated English, and falls back to English with translated=false.
+    5. Score, lucky_time numbers, and category keys are identical across languages.
+    6. If the English row changes, the old cached translation is not reused.
+    """
+    import threading
+    from services.landing_translation import (
+        translate_items,
+        _TRANSLATION_CACHE,
+        _FAILURE_CACHE,
+        _validate_translation,
+        _get_sha1,
+        get_translation_stats,
+    )
+    from controllers.horoscope_controller import VALID_LANGUAGES
+
+    print("\n" + "=" * 70)
+    print("🧪 RUNNING HOROSCOPE TRANSLATION TEST SUITE")
+    print("=" * 70)
+
+    # Test 1: lang=en never calls Mistral; unsupported lang validation
+    print("\n[Test 1] Testing language validation...")
+    assert "en" in VALID_LANGUAGES and "hi" in VALID_LANGUAGES and "bn" in VALID_LANGUAGES
+    assert "ta" in VALID_LANGUAGES and "fr" in VALID_LANGUAGES
+    assert "es" not in VALID_LANGUAGES and "de" not in VALID_LANGUAGES
+
+    mock_items = [
+        {
+            "category": "cosmic_pulse",
+            "text": "The Moon enters your sign today, bringing emotional clarity.\n\nTake time for mindful meditation.",
+            "score": 88,
+            "lucky_time": "09:00 AM - 11:30 AM",
+            "remedy": "Offer water to the rising Sun.",
+            "affirmation": "I embrace peace and abundance.",
+            "tip_for_the_day": "Stay grounded and trust your intuition.",
+        },
+        {
+            "category": "wealth",
+            "text": "Financial investments show promising growth.\n\nAvoid speculative trading in the afternoon.",
+            "score": 75,
+            "lucky_time": "02:15 PM to 04:00 PM",
+            "remedy": "Chant the Lakshmi Beej Mantra.",
+            "affirmation": "Wealth flows easily into my life.",
+            "tip_for_the_day": "Review your monthly budget carefully.",
+        }
+    ]
+    meta = {"sign": "taurus", "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+
+    # Call to lang=en
+    stats_before = get_translation_stats()
+    en_res = translate_items(mock_items, "en", meta)
+    stats_after = get_translation_stats()
+    assert en_res[0]["text"] == mock_items[0]["text"], "English text was modified"
+    assert en_res[0]["score"] == 88, "Score changed"
+    assert stats_after["total_calls"] == stats_before["total_calls"], "Mistral was called for English"
+    print("  ✓ lang=en returned rows unchanged without calling Mistral.")
+
+    # Test 2: Cache hit test - same request twice triggers exactly 1 Mistral call
+    print("\n[Test 2] Testing caching & idempotency...")
+    test_sign = "virgo_test"
+    test_meta = {"sign": test_sign, "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+    
+    call_count = 0
+    import services.landing_translation as lt
+    orig_execute = lt._execute_mistral_chunk
+    
+    def fake_execute(chunk, lang, m):
+        nonlocal call_count
+        call_count += 1
+        time.sleep(0.05)
+        res = {}
+        for it in chunk:
+            c = it["category"]
+            res[c] = {
+                "text": "चंद्रमा आज आपकी राशि में प्रवेश कर रहा है, जिससे भावनात्मक स्पष्टता आएगी।\n\nसचेत ध्यान के लिए समय निकालें।",
+                "remedy": "उगते सूर्य को जल अर्पित करें।",
+                "affirmation": "मैं शांति और समृद्धि को स्वीकार करता हूं।",
+                "lucky_time": "सुबह 09:00 AM - 11:30 AM",
+                "tip_for_the_day": "धैर्य रखें और अपनी अंतरात्मा पर भरोसा करें।",
+            }
+        return res
+
+    lt._execute_mistral_chunk = fake_execute
+    try:
+        # First call -> triggers fake_execute
+        res1 = lt.translate_items(mock_items[:1], "hi", test_meta)
+        assert call_count == 1, f"Expected 1 call, got {call_count}"
+        assert res1[0]["translated"] is True
+        assert "चंद्रमा" in res1[0]["text"]
+
+        # Second call with same parameters -> must hit cache!
+        res2 = lt.translate_items(mock_items[:1], "hi", test_meta)
+        assert call_count == 1, f"Expected call count to remain 1, got {call_count}"
+        assert res2[0]["text"] == res1[0]["text"]
+        print("  ✓ Second request served from memory cache (call count stayed 1).")
+    finally:
+        lt._execute_mistral_chunk = orig_execute
+
+    # Test 3: 10 simultaneous requests trigger exactly 1 Mistral call
+    print("\n[Test 3] Testing 10 simultaneous parallel requests de-duplication...")
+    concurrent_calls = 0
+    def slow_fake_execute(chunk, lang, m):
+        nonlocal concurrent_calls
+        concurrent_calls += 1
+        time.sleep(0.15)
+        res = {}
+        for it in chunk:
+            c = it["category"]
+            res[c] = {
+                "text": "চাঁদ আজ আপনার রাশিতে প্রবেশ করছে, যা মানসিক স্পষ্টতা এনে দেবে।\n\nমননশীল ধ্যানের জন্য সময় দিন।",
+                "remedy": "উদীয়মান সূর্যকে জল অর্পণ করুন।",
+                "affirmation": "আমি শান্তি ও প্রাচুর্য গ্রহণ করি।",
+                "lucky_time": "সকাল 09:00 AM - 11:30 AM",
+                "tip_for_the_day": "ধৈর্য ধরুন এবং আপনার অন্তর্দৃষ্টিতে বিশ্বাস রাখুন।",
+            }
+        return res
+
+    orig_execute = lt._execute_mistral_chunk
+    lt._execute_mistral_chunk = slow_fake_execute
+    try:
+        simul_meta = {"sign": "libra_simul", "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+        results = [None] * 10
+        threads = []
+        def worker(idx):
+            results[idx] = lt.translate_items(mock_items[:1], "bn", simul_meta)
+
+        for i in range(10):
+            t = threading.Thread(target=worker, args=(i,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        assert concurrent_calls == 1, f"Expected exactly 1 Mistral call for 10 concurrent requests, got {concurrent_calls}"
+        for r in results:
+            assert r[0]["translated"] is True
+            assert "চাঁদ" in r[0]["text"]
+        print("  ✓ 10 simultaneous requests triggered exactly 1 Mistral call.")
+    finally:
+        lt._execute_mistral_chunk = orig_execute
+
+    # Test 4: Validator rejects wrong paragraph count, markdown, untranslated English and truncated JSON
+    print("\n[Test 4] Testing validation rules...")
+    # 4a: Wrong paragraph count
+    bad_para = {"text": "Only one paragraph without break."}
+    v_res, err = _validate_translation(bad_para, mock_items[0], "hi")
+    assert not v_res and "Paragraph count mismatch" in err, f"Failed: {err}"
+    print("  ✓ Rejected paragraph count mismatch.")
+
+    # 4b: Markdown in text
+    bad_md = {"text": "**bold title**\n\n- bullet point item"}
+    v_res, err = _validate_translation(bad_md, mock_items[0], "hi")
+    assert not v_res and "Markdown" in err, f"Failed: {err}"
+    print("  ✓ Rejected markdown formatting.")
+
+    # 4c: Untranslated English in Hindi
+    bad_script = {"text": "This is completely in English language without any Devanagari.\n\nAnother paragraph in English."}
+    v_res, err = _validate_translation(bad_script, mock_items[0], "hi")
+    assert not v_res and ("script" in err.lower() or "english" in err.lower()), f"Failed: {err}"
+    print("  ✓ Rejected untranslated English in Hindi script check.")
+
+    # 4d: Truncated JSON / failure fallback
+    def failing_execute(chunk, lang, m):
+        return None # Simulated truncated JSON or API failure
+
+    lt._execute_mistral_chunk = failing_execute
+    try:
+        fail_meta = {"sign": "scorpio_fail", "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+        fail_res = lt.translate_items(mock_items[:1], "hi", fail_meta)
+        assert fail_res[0]["translated"] is False, "Expected translated=False on failure"
+        assert fail_res[0]["text"] == mock_items[0]["text"], "Expected fallback to English text"
+        print("  ✓ Truncated/failed translation fell back to English with translated=false.")
+    finally:
+        lt._execute_mistral_chunk = orig_execute
+
+    # Test 5: Score, lucky_time numbers, and category keys identical across languages
+    print("\n[Test 5] Testing score, numbers, and category keys fidelity...")
+    valid_trans = {
+        "text": "चंद्रमा आज आपकी राशि में प्रवेश कर रहा है।\n\nसचेत ध्यान के लिए समय निकालें।",
+        "score": 999, # LLM attempts to tamper with score
+        "lucky_time": "शुभ समय 09:00 AM - 11:30 AM",
+        "category": "hacked_category"
+    }
+    def mock_good_execute(chunk, lang, m):
+        return {"cosmic_pulse": valid_trans}
+
+    lt._execute_mistral_chunk = mock_good_execute
+    try:
+        safe_meta = {"sign": "leo_safe", "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+        safe_res = lt.translate_items(mock_items[:1], "hi", safe_meta)
+        assert safe_res[0]["score"] == 88, f"Score was tampered: {safe_res[0]['score']} != 88"
+        assert safe_res[0]["category"] == "cosmic_pulse", "Category key was altered"
+        assert "09:00 AM - 11:30 AM" in safe_res[0]["lucky_time"], "Lucky time numbers altered"
+        print("  ✓ Score (88), category key ('cosmic_pulse'), and time numbers preserved exactly.")
+    finally:
+        lt._execute_mistral_chunk = orig_execute
+
+    # Test 6: If English row changes, old cached translation is not reused
+    print("\n[Test 6] Testing cache invalidation when English text changes...")
+    def dynamic_execute(chunk, lang, m):
+        res = {}
+        for it in chunk:
+            res[it["category"]] = {
+                "text": f"अनुवाद: {it['text'][:30]}...",
+                "lucky_time": it.get("lucky_time", "")
+            }
+        return res
+
+    lt._execute_mistral_chunk = dynamic_execute
+    try:
+        inv_meta = {"sign": "pisces_inv", "system": "tropical", "period": "daily", "period_start": "2026-11-14", "period_end": "2026-11-14"}
+        item_v1 = [dict(mock_items[0], text="Version 1 original text.\n\nSecond paragraph.")]
+        res_v1 = lt.translate_items(item_v1, "hi", inv_meta)
+
+        # Modify English text in row
+        item_v2 = [dict(mock_items[0], text="Version 2 updated text from database.\n\nSecond paragraph.")]
+        res_v2 = lt.translate_items(item_v2, "hi", inv_meta)
+
+        assert res_v1[0]["text"] != res_v2[0]["text"], "Old translation was reused despite English text change!"
+        assert "Version 2" in res_v2[0]["text"], "New translation did not reflect updated English text"
+        print("  ✓ English row modification correctly bypassed stale cache (SHA1 check passed).")
+    finally:
+        lt._execute_mistral_chunk = orig_execute
+
+    print("\n" + "=" * 70)
+    print("✅ ALL 6 TRANSLATION UNIT TESTS PASSED SUCCESSFULLY!")
+    print("=" * 70 + "\n")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AstroJunction Batch Horoscope Generator")
+    parser.add_argument("--test-translation", action="store_true", help="Run translation unit test suite")
     parser.add_argument("--period", choices=["daily", "weekly", "monthly", "yearly", "all"], default="daily")
     parser.add_argument("--year", type=int, default=None, help="Target year for yearly horoscope (e.g. 2026)")
     parser.add_argument("--category", choices=["all", "cosmic_pulse"], default="all", help="Category to generate ('all' or 'cosmic_pulse')")
@@ -585,6 +822,11 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="Dry run without writing to database or calling LLM")
 
     args = parser.parse_args()
+
+    if args.test_translation:
+        run_translation_tests()
+        sys.exit(0)
+
     target_dt = datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else (date(args.year, 1, 1) if args.year else date.today())
     run_batch_generation(
         args.period,
