@@ -436,20 +436,12 @@ def _generate_fallback_zodiac_forecast(sign: str, timeframe: str, language: str 
     m = meta.get(sign_key, meta["aries"])
     structured_today_pulse = get_structured_cosmic_pulse(sign_key, language)
 
-    if language == 'bn':
-        forecast_texts = {
-            'today': f"{sign.capitalize()} রাশির জাতক-জাতিকাদের জন্য আজকের গ্রহ অবস্থান আত্মবিশ্বাস ও একাগ্রতা বৃদ্ধির ইঙ্গিত দিচ্ছে। আর্থিক লেনদেনে ইতিবাচক অগ্রগতি এবং মানসিক শান্তি বজায় থাকবে।",
-            'week': f"এই সপ্তাহে বৃহস্পতি ও বুধের শুভ গোচরে {sign.capitalize()} রাশির নতুন পরিকল্পনা সফল হওয়ার শুভ যোগ রয়েছে। কর্মক্ষেত্রে সিনিয়রদের সহযোগিতা পাবেন।",
-            'month': f"চলতি মাসে কর্ম ও আর্থিক ক্ষেত্রে গুরুত্বপূর্ণ অগ্রগতির সম্ভাবনা রয়েছে। কৌশলগত সিদ্ধান্ত গ্রহণে ধৈর্য বজায় রাখুন।",
-            'year': f"২০২৬-২৭ সালে শনি ও বৃহস্পতির অনুকূল প্রভাব আপনার দীর্ঘমেয়াদী লক্ষ্যপূরণে শক্তিশালী ভূমিকা রাখবে।"
-        }
-    else:
-        forecast_texts = {
-            'today': structured_today_pulse,
-            'week': f"This week opens promising windows for strategic collaboration and professional growth for {sign.capitalize()}. Mercury's supportive aspect enhances negotiation and creative brainstorming.",
-            'month': f"Monthly planetary ingresses favor long-term consolidation and auspicious financial planning for {sign.capitalize()}. Maintain disciplined routines and trust your inner wisdom.",
-            'year': f"The 2026/2027 astrological panorama marks a profound phase of karmic ascension and material stability for {sign.capitalize()}."
-        }
+    forecast_texts = {
+        'today': structured_today_pulse,
+        'week': f"This week opens promising windows for strategic collaboration and professional growth for {sign.capitalize()}. Mercury's supportive aspect enhances negotiation and creative brainstorming.",
+        'month': f"Monthly planetary ingresses favor long-term consolidation and auspicious financial planning for {sign.capitalize()}. Maintain disciplined routines and trust your inner wisdom.",
+        'year': f"The 2026/2027 astrological panorama marks a profound phase of karmic ascension and material stability for {sign.capitalize()}."
+    }
     
     forecast_str = forecast_texts.get(timeframe, forecast_texts['today'])
     category_insights = _generate_category_insights(sign, language)
@@ -597,7 +589,7 @@ def get_zodiac_compatibility_response(
 ) -> str:
     system_prompt = f"""You are an expert Vedic and Western Astrologer. Calculate the unique compatibility between {sign_a.capitalize()} and {sign_b.capitalize()} using the {system} system.
 Calculate a highly accurate overall compatibility score (0-100) based on elements, modalities, and planetary rulers.
-MUST respond ONLY with valid JSON, in language {language} (if 'bn' use Bengali). Do not include any comments or markdown inside the JSON object:
+MUST respond ONLY with valid JSON in English. Do not include any comments or markdown inside the JSON object:
 {{
   "overallScore": 68,
   "elementSynergy": "Short description of elemental synergy",
@@ -665,8 +657,7 @@ You MUST respond with ONLY a valid JSON object matching exactly this structure, 
   }}
 }}
 
-All text fields MUST be in the requested language: {language}.
-If the language is 'bn', use natural Bengali script.
+All text fields MUST be in English.
 Provide exactly 3 short traits for mulankCharacteristics. Provide customized remedies for the exact missing numbers (or general if none missing). Provide 1-sentence analysis for each of the 8 Lo Shu planes.
 """
     history = [{"role": "user", "content": "Generate the Numerology JSON insights."}]
@@ -782,7 +773,7 @@ Requirements:
 - Generate EXACTLY 15 milestones (5 for '0-5 Years', 5 for '0-10 Years', 5 for '0-15 Years') covering all 5 categories for each timeframe.
 - Set status to 'In-Progress' for '0-5 Years', and 'Pending' for '0-10 Years' and '0-15 Years'.
 - The predictions MUST specifically mention their {lagna_rashi} ascendant and {maha_dasha}/{antar_dasha} dasha period so it feels deeply personalized!
-- All text values MUST be translated directly into the language code: {language}. If 'bn', use Bengali script.
+- All text values MUST be in clear, professional English.
 - Do NOT output anything outside the JSON object. No markdown formatting.
 """
 
@@ -887,32 +878,6 @@ def get_interpret_response(
     trad_title = tradition_titles.get(tradition.lower(), f"{tradition.upper()} Tradition")
 
     def generate_full_5_card_synthesis():
-        if language == "bn":
-            return f"""### Cosmic Synthesis & Lagna Archetype
-- **লগ্নের আত্মিক শক্তি ({lagna_rashi} Lagna)**: আপনার লগ্ন {lagna_rashi} আপনার শারীরিক জীবনীশক্তি, মানসিক দৃঢ়তা এবং ব্যক্তিত্বের মূল কাঠামো নির্দেশ করে। এটি আপনার কর্মশক্তি এবং জীবনের লক্ষ্য অর্জনে ধারাবাহিক একাগ্রতা প্রদান করে।
-- **জন্ম নক্ষত্রের প্রভাব ({lagna_nak})**: {lagna_nak} নক্ষত্রের শাসনে আপনার মনস্তাত্ত্বিক উপলব্ধি এবং গভীর অন্তর্দৃষ্টি বিকশিত হয়, যা গুরুত্বপূর্ণ সিদ্ধান্ত গ্রহণে দূরদর্শিতা ও নেতৃত্ব দান করে।
-- **লগ্নপতির আত্মিক দিকদর্শন**: আপনার লগ্নপতির অনুকূল প্রভাব জীবনশক্তিকে গভীর বৌদ্ধিক চেতনা, কর্মনিষ্ঠা এবং সমাজে নিজস্ব অবস্থান মজবুত করার দিকে পরিচালিত করে।
-
-### Bhava Alignments & House Lord Dynamics
-- **কর্মস্থান ও পেশাগত প্রতিষ্ঠা (দশম ভাব - {h10_sign})**: {h10_sign} রাশিতে অবস্থানরত দশম ভাব এবং এর অধিপতি {h10_lord}-এর প্রভাবে আপনার কর্মজীবনে প্রশাসনিক দক্ষতা, নেতৃত্ব ও দীর্ঘমেয়াদী প্রতিষ্ঠা অর্জনের শক্তিশালী যোগ রয়েছে।
-- **ধন ও লাভ সমৃদ্ধি প্রবাহ (দ্বিতীয় ও একাদশ ভাব - {h2_sign} ও {h11_sign})**: ধনভাব ({h2_sign}) এবং লাভভাব ({h11_sign})-এর যৌথ গতিশীলতা আর্থিক নিরাপত্তা, সুশৃঙ্খল সঞ্চয় এবং সফল বিনিয়োগের অনুকূল ভিত্তি তৈরি করে।
-- **কেন্দ্র ও ত্রিকোণ সামঞ্জস্য**: কেন্দ্র ও ত্রিকোণ ভাবগুলির অন্তর্নিহিত ভারসাম্য আপনার সার্বিক জীবনে স্থায়িত্ব প্রদান করে এবং সাময়িক অস্থিরতা থেকে রক্ষা করে।
-
-### Tradition-Specific Deep Dive ({trad_title})
-- **শাস্ত্রীয় সূত্র বিশ্লেষণ**: {trad_title}-এর শাস্ত্রীয় নিয়ম অনুযায়ী আপনার কুষ্ঠির বিশেষ গ্রহ সংযোগগুলি প্রতিকূলতাকে সম্ভাবনায় রূপান্তর করার শক্তিশালী সংকেত বহন করে।
-- **বর্তমান মহাদশা ({maha_dasha}) রূপান্তর**: সক্রিয় {maha_dasha} মহাদশা আপনার জীবনে একটি গভীর আত্মবিকাশ ও পেশাগত অগ্রগতির মূল সময়কাল নির্দেশ করে।
-- **অন্তর্দশা ({antar_dasha}) সুযোগ ও সচেতনতা**: সক্রিয় {antar_dasha} অন্তর্দশার প্রভাব তাৎক্ষণিক সিদ্ধান্ত ও পরিকল্পনা রূপায়ণে নতুন দিগন্ত উন্মোচন করে। সুশৃঙ্খল পদক্ষেপ সর্বোচ্চ শুভফল নিশ্চিত করবে।
-
-### Planetary Yogas & Auspicious Formations
-- **সক্রিয় শুভ যোগ ({yoga_name1})**: {yoga_desc1}
-- **কসমিক সমৃদ্ধি ও সম্পদ প্রবাহ ({yoga_name2})**: {yoga_desc2}
-- **আধ্যাত্মিক বিবর্তন ও কর্মিক শিক্ষা**: রাহূ-কেতু ও শনি গ্রহের অবস্থান অন্তর্জাগরণ জাগ্রত করে, জীবনের চ্যালেঞ্জগুলিকে পরম অভিজ্ঞতায় রূপান্তর করতে সাহায্য করে।
-
-### Sacred Vedic Upayas & Remedial Directives
-- **নির্দিষ্ট বৈদিক মন্ত্র জপ**: প্রতিদিন ভোরে সূর্যোদয়কালে শান্ত চিত্তে `ওঁ নমো ভগবতে বাসুদেবায়` অথবা আপনার ইষ্ট মন্ত্র ১০৮ বার জপ করুন, যা মানসিক স্থৈর্য ও আত্মবিশ্বাস বৃদ্ধি করবে।
-- **রত্ন ও শুভ ধাতুর ভারসাম্য**: লগ্নপতির অনুকূল রত্ন (যেমন হলুদ পোখরাজ, রক্তপ্রবাল বা পান্না) এবং শুভ ধাতু ধারণ গ্রহের ইতিবাচক স্পন্দনকে শক্তিশালী করে।
-- **নিত্য সাধনা ও শুভ দান**: রবিবারে তাম্রপাত্রে সূর্যদেবের উদ্দেশ্যে জল নিবেদন (সূর্য অর্ঘ্য) এবং অভাবগ্রস্তদের অন্ন বা বস্ত্র দান করলে কর্মিক বাধা দূরীভূত হয়।"""
-
         return f"""### Cosmic Synthesis & Lagna Archetype
 - **Ascendant ({lagna_rashi}) Core Vitality**: Your Lagna in {lagna_rashi} anchors your fundamental constitution, personal charisma, and psychological resilience. It defines how you meet challenges and grants the steadfast willpower needed to accomplish significant worldly and spiritual goals.
 - **Janma Nakshatra ({lagna_nak}) Intuition**: Governed by {lagna_nak}, your mental processing and subconscious instincts are imbued with sharp discernment and perception, guiding strategic judgment in crucial personal and professional crossroads.
@@ -942,16 +907,11 @@ def get_interpret_response(
         if not text:
             return ""
         cleaned = re.sub(r'^[#\s*]+', '### ', text.strip())
-        if language != 'bn':
-            cleaned = re.sub(r'\s*\([^\)]*[\u0980-\u09FF]+[^\)]*\)\s*', '', cleaned)
-            cleaned = re.sub(r'\s*\(In (?:fluent )?[A-Za-z\s]+script:[^\)]*\)\s*', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\([^\)]*[\u0980-\u09FF]+[^\)]*\)\s*', '', cleaned)
+        cleaned = re.sub(r'\s*\(In (?:fluent )?[A-Za-z\s]+script:[^\)]*\)\s*', '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip()
 
     lang_inst = "All text MUST be 100% in English only."
-    if language == 'bn':
-        lang_inst = "All text MUST be written in fluent, authentic Bengali script."
-    elif language and language != 'en':
-        lang_inst = f"All text MUST be in language code: {language}."
 
     system_prompt = f"""You are AstroJunction Daivajna, an authentic, revered Vedic Astrologer providing personalized, enlightened astrological counsel for {profile_name}.
 Tradition: {trad_title}. Lagna: {lagna_rashi} ({lagna_nak}). Active Dasha: {maha_dasha} Mahadasha / {antar_dasha} Antardasha.
@@ -1121,7 +1081,7 @@ You MUST return a JSON object with EXACTLY this structure containing predictions
 Requirements:
 - Must generate predictions for ALL 8 topics listed above.
 - Ensure prediction specifically mentions user's {lagna_rashi} ascendant and {maha_dasha} Mahadasha.
-- All text values MUST be translated directly into the language code: {language}. If 'bn', use Bengali script.
+- All text values MUST be in clear, professional English.
 - Output ONLY valid JSON, no markdown outside code blocks.
 """
 
