@@ -789,26 +789,40 @@ _scheduler_started = False
 _scheduler_lock = threading.Lock()
 
 
+def get_now_ist() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Kolkata"))
+    except Exception:
+        return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
 def get_daily_scheduler_config() -> dict:
     """
     Reads the scheduler time and check interval dynamically from environment variables (.env).
-    - DAILY_INSIGHTS_SCHEDULER_TIME: 24-hr format HH:MM (e.g. '00:05', '05:00', '06:30')
-    - DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS: Daemon periodic check frequency in seconds (default: 600)
+    - DAILY_INSIGHTS_SCHEDULER_TIME: 24-hr format HH:MM (e.g. '00:05', '05:00', '06:30', '10:30')
+    - DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS: Daemon periodic check frequency in seconds (default: 60)
     """
-    time_str = os.getenv("DAILY_INSIGHTS_SCHEDULER_TIME", "00:05").strip()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+    except Exception:
+        pass
+
+    time_str = os.getenv("DAILY_INSIGHTS_SCHEDULER_TIME", "10:30").strip()
     try:
         parts = time_str.split(":")
         target_hour = int(parts[0])
         target_minute = int(parts[1]) if len(parts) > 1 else 0
     except Exception:
-        target_hour, target_minute = 0, 5
+        target_hour, target_minute = 10, 30
 
     try:
-        check_interval = int(os.getenv("DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS", "600"))
-        if check_interval < 10:
-            check_interval = 10
+        check_interval = int(os.getenv("DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS", "60"))
+        if check_interval < 5:
+            check_interval = 5
     except Exception:
-        check_interval = 600
+        check_interval = 60
 
     return {
         "time_str": f"{target_hour:02d}:{target_minute:02d}",
@@ -820,27 +834,28 @@ def get_daily_scheduler_config() -> dict:
 
 def _scheduler_worker():
     config = get_daily_scheduler_config()
-    print(f"[Daily Insights Scheduler] Background thread initialized. Running one-time startup check (Configured daily time: {config['time_str']}).")
+    print(f"[Daily Insights Scheduler] Background thread initialized in IST. Running startup check (Configured daily time: {config['time_str']} IST, check interval: {config['check_interval']}s).")
 
     # Run initial check after a brief server startup delay (4 seconds)
     time.sleep(4)
-    today_str = str(date.today())
+    now_startup = get_now_ist()
+    today_str = str(now_startup.date())
     try:
         # On server startup, ensure today's insights exist for all 12 signs without overwriting if already generated
         fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
         # Startup catch-up: if current week's rows are missing (<96), generate only the missing ones
-        ensure_weekly_insights_ready(target_date=date.today(), force=False)
+        ensure_weekly_insights_ready(target_date=now_startup.date(), force=False)
         # Startup catch-up: if current month's rows are missing (<192), generate only the missing ones
-        ensure_monthly_insights_ready(target_date=date.today(), force=False)
+        ensure_monthly_insights_ready(target_date=now_startup.date(), force=False)
         # Startup catch-up: if current year's rows are missing (<192), generate only the missing ones
-        ensure_yearly_insights_ready(target_year=date.today().year, force=False)
+        ensure_yearly_insights_ready(target_year=now_startup.year, force=False)
     except Exception as e:
         print(f"[Daily Insights Scheduler] Startup check encountered exception: {e}")
 
-    # Single-run mode: defaults to True so scheduler runs only one time per server start
-    run_once = os.getenv("DAILY_INSIGHTS_RUN_ONCE", "true").lower() in ("true", "1", "yes")
+    # Single-run mode: defaults to False so scheduler runs continuously every day
+    run_once = os.getenv("DAILY_INSIGHTS_RUN_ONCE", "false").lower() in ("true", "1", "yes")
     if run_once:
-        print("[Daily Insights Scheduler] One-time execution completed successfully. Scheduler thread stopped.")
+        print("[Daily Insights Scheduler] One-time execution completed. Scheduler thread stopped.")
         return
 
     last_scheduled_date_run = None
@@ -848,17 +863,17 @@ def _scheduler_worker():
     try:
         existing_test = get_sign_daily_insights_from_db("aries", today_str)
         if existing_test:
-            last_scheduled_date_run = date.today()
+            last_scheduled_date_run = now_startup.date()
     except Exception:
         pass
 
-    # Continuous loop: only runs when DAILY_INSIGHTS_RUN_ONCE=false is set in .env
+    # Continuous loop: runs continuously every day
     while True:
         config = get_daily_scheduler_config()
         sleep_seconds = config["check_interval"]
         try:
             time.sleep(sleep_seconds)
-            now = datetime.now()
+            now = get_now_ist()
             today_date = now.date()
             today_str = str(today_date)
             target_hour = config["target_hour"]
@@ -869,7 +884,7 @@ def _scheduler_worker():
             has_reached_time = (now.hour > target_hour) or (now.hour == target_hour and now.minute >= target_minute)
 
             if is_new_day and has_reached_time:
-                print(f"[Daily Insights Scheduler] Triggering scheduled daily LLM generation for {today_str} at {now.strftime('%H:%M:%S')} (Configured time: {config['time_str']})...")
+                print(f"[Daily Insights Scheduler] Triggering scheduled daily LLM generation for {today_str} at {now.strftime('%H:%M:%S')} IST (Configured time: {config['time_str']} IST)...")
                 fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=True)
                 # If today is Monday (weekday == 0), trigger fresh weekly generation
                 if today_date.weekday() == 0:

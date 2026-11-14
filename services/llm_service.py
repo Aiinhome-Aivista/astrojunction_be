@@ -56,7 +56,7 @@ def _get_llm_timeout() -> int:
         return 30
 
 
-def _call_mistral_local(system_prompt: str, history: list) -> str:
+def _call_mistral_local(system_prompt: str, history: list, max_tokens: int = None) -> str:
     base_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
     model = get_setting("MISTRAL_MODEL", "")
     if not base_url or not model:
@@ -64,9 +64,7 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
             "ACTIVE_LLM is set to mistral_local but MISTRAL_LOCAL_URL or MISTRAL_MODEL is not configured in Admin Settings."
         )
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: mistral_local | Model/Version: {model} | URL: {base_url}/api/generate")
-    print(f"{'='*60}\n")
+    # mistral_local endpoint call
 
     prompt = system_prompt + "\n\n"
     for msg in history:
@@ -78,10 +76,11 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
     resp = None
     try:
         try:
+            req_body = {"model": model, "prompt": prompt, "stream": False, "temperature": 0.1}
             resp = requests.post(
                 f"{base_url}/api/generate",
                 headers={"Connection": "close"},
-                json={"model": model, "prompt": prompt, "stream": False, "temperature": 0.1},
+                json=req_body,
                 timeout=timeout,
             )
         except requests.RequestException:
@@ -89,10 +88,15 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
             try:
                 print(f"[LLM FALLBACK CALL] Provider: mistral_local | Model/Version: {model} | URL: {base_url}/v1/chat/completions")
                 messages = [{"role": "system", "content": system_prompt}] + history
+                chat_payload = {"model": model, "messages": messages, "temperature": 0.1}
+                if max_tokens:
+                    chat_payload["max_tokens"] = max_tokens
+                if "json" in system_prompt.lower():
+                    chat_payload["response_format"] = {"type": "json_object"}
                 resp = requests.post(
                     f"{base_url}/v1/chat/completions",
                     headers={"Connection": "close"},
-                    json={"model": model, "messages": messages, "temperature": 0.1},
+                    json=chat_payload,
                     timeout=timeout,
                 )
                 if resp.status_code == 200:
@@ -129,10 +133,6 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
             "MISTRAL_CLOUD_API_KEY are not fully configured."
         )
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: mistral_cloud | Model/Version: {model} | URL: {base_url}/v1/chat/completions (max_tokens: {max_tokens})")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
     payload = {"model": model, "messages": messages, "temperature": 0.1}
@@ -154,7 +154,7 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: mistral_cloud | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] mistral_cloud ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -166,7 +166,7 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
             resp.close()
 
 
-def _call_gemini(system_prompt: str, history: list) -> str:
+def _call_gemini(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("GEMINI_API_KEY", "")
     model = get_setting("GEMINI_MODEL", "gemini-2.0-flash")
     if not api_key:
@@ -179,20 +179,24 @@ def _call_gemini(system_prompt: str, history: list) -> str:
         f"https://generativelanguage.googleapis.com/{api_version}/models/"
         f"{model}:generateContent?key={api_key}"
     )
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: gemini | Model: {model} | API Version: {api_version} | Endpoint: generativelanguage.googleapis.com/{api_version}/models/{model}:generateContent")
-    print(f"{'='*60}\n")
-
     convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
     full_prompt = f"{system_prompt}\n\n--- Conversation ---\n{convo_text}"
 
     timeout = _get_llm_timeout()
     resp = None
     try:
+        body = {"contents": [{"parts": [{"text": full_prompt}]}]}
+        gen_config = {"temperature": 0.1}
+        if max_tokens:
+            gen_config["maxOutputTokens"] = max_tokens
+        if "json" in system_prompt.lower():
+            gen_config["responseMimeType"] = "application/json"
+        body["generationConfig"] = gen_config
+
         resp = requests.post(
             url,
             headers={"Connection": "close"},
-            json={"contents": [{"parts": [{"text": full_prompt}]}]},
+            json=body,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -200,7 +204,7 @@ def _call_gemini(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         model_version = data.get("modelVersion", model)
-        print(f"[LLM RESPONSE] Provider: gemini | Configured Model: {model} | Resolved Version: {model_version}")
+        print(f"[LLM] gemini ({model_version}) -> 200 OK")
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError):
@@ -212,25 +216,27 @@ def _call_gemini(system_prompt: str, history: list) -> str:
             resp.close()
 
 
-def _call_openai(system_prompt: str, history: list) -> str:
+def _call_openai(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("OPENAI_API_KEY", "")
     base_url = get_setting("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     model = get_setting("OPENAI_MODEL", "gpt-4o-mini")
     if not api_key:
         raise LLMError("ACTIVE_LLM is set to openai but OPENAI_API_KEY is not configured.")
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: openai | Model/Version: {model} | URL: {base_url}/chat/completions")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
+    payload = {"model": model, "messages": messages, "temperature": 0.1}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    if "json" in system_prompt.lower():
+        payload["response_format"] = {"type": "json_object"}
+
     resp = None
     try:
         resp = requests.post(
             f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Connection": "close"},
-            json={"model": model, "messages": messages, "temperature": 0.1},
+            json=payload,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -238,7 +244,7 @@ def _call_openai(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: openai | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] openai ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -250,19 +256,21 @@ def _call_openai(system_prompt: str, history: list) -> str:
             resp.close()
 
 
-def _call_openrouter(system_prompt: str, history: list) -> str:
+def _call_openrouter(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("OPENROUTER_API_KEY", "")
     base_url = get_setting("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
     model = get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
     if not api_key:
         raise LLMError("ACTIVE_LLM is set to openrouter but OPENROUTER_API_KEY is not configured.")
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: openrouter | Model/Version: {model} | URL: {base_url}/chat/completions")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
+    payload = {"model": model, "messages": messages}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    if "json" in system_prompt.lower():
+        payload["response_format"] = {"type": "json_object"}
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://astrojunction.com",
@@ -274,7 +282,7 @@ def _call_openrouter(system_prompt: str, history: list) -> str:
         resp = requests.post(
             f"{base_url}/chat/completions",
             headers=headers,
-            json={"model": model, "messages": messages},
+            json=payload,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -282,7 +290,7 @@ def _call_openrouter(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: openrouter | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] openrouter ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -315,22 +323,18 @@ def _execute_llm(system_prompt: str, history: list, max_tokens: int = None) -> s
         if not model_name:
             raise LLMError("ACTIVE_LLM is set to mistral_local but MISTRAL_MODEL is not configured in Admin Settings.")
 
-    print("\n" + "=" * 65)
-    print(f"🤖 [LLM CALL TRIGGERED] Active Provider: >>> {active_llm.upper()} <<<")
-    print(f"📦 [LLM MODEL]           Model Name:      >>> {model_name} <<<")
-    print(f"🛡️  [FAILOVER STATUS]    Fallback:        >>> NONE (Strict Single Engine) <<<")
-    print("=" * 65 + "\n")
+    print(f"[LLM] >>> {active_llm.upper()} ({model_name}) | max_tokens: {max_tokens or 'auto'}")
 
     if active_llm == "mistral_local":
-        return _call_mistral_local(system_prompt, history)
+        return _call_mistral_local(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "mistral_cloud":
         return _call_mistral_cloud(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "gemini":
-        return _call_gemini(system_prompt, history)
+        return _call_gemini(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "openai":
-        return _call_openai(system_prompt, history)
+        return _call_openai(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "openrouter":
-        return _call_openrouter(system_prompt, history)
+        return _call_openrouter(system_prompt, history, max_tokens=max_tokens)
     else:
         raise LLMError(f"Unknown or unconfigured LLM provider: '{active_llm}'")
 
@@ -990,45 +994,9 @@ You MUST use EXACTLY these 5 headings:
 
 
 def generate_raw_completion(prompt: str, model: str = None) -> str:
-    """Directly calls the configured LLM with a raw prompt string."""
-    raw_url = get_setting("MISTRAL_LOCAL_URL", "").strip().rstrip("/")
-    if not raw_url:
-        raise LLMError("MISTRAL_LOCAL_URL is not configured in Admin Settings.")
-    model_name = model or get_setting("MISTRAL_MODEL", "mistral:latest")
-    
-    if raw_url.endswith("/api/generate") or raw_url.endswith("/api/chat"):
-        endpoint_url = raw_url
-    else:
-        endpoint_url = f"{raw_url}/api/generate"
-
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": False,
-    }
-
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL - Raw Completion] Provider: mistral_local | Model/Version: {model_name} | Endpoint: {endpoint_url}")
-    print(f"{'='*60}\n")
-
-    resp = None
-    try:
-        resp = requests.post(endpoint_url, headers={"Connection": "close"}, json=payload, timeout=120)
-        if resp.status_code != 200:
-            raise LLMError(f"LLM server returned HTTP {resp.status_code}: {resp.text[:300]}")
-
-        data = resp.json()
-        returned_model = data.get("model", model_name)
-        print(f"[LLM RESPONSE - Raw Completion] Resolved Model/Version: {returned_model}")
-        content = data.get("response") or (data.get("message") or {}).get("content") or data.get("text")
-        if not content:
-            raise LLMError("LLM server returned an unexpected response shape.")
-        return content
-    except requests.RequestException as e:
-        raise LLMError(f"Could not reach LLM endpoint at {endpoint_url}: {e}")
-    finally:
-        if resp is not None:
-            resp.close()
+    """Calls the active LLM configured in Admin Settings with a prompt string."""
+    history = [{"role": "user", "content": prompt}]
+    return _execute_llm("", history)
 
 
 def get_filtered_roadmap_predictions_response(

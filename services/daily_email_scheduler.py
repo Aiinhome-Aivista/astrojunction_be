@@ -237,19 +237,37 @@ def mark_subscriber_sent(subscriber_id: int, sent_date: str):
 def get_daily_email_scheduler_config() -> dict:
     """
     Reads the daily email scheduler settings dynamically from .env:
-    - DAILY_EMAIL_SCHEDULER_START_HOUR: Beginning of morning dispatch window in IST (default: 6)
-    - DAILY_EMAIL_CUTOFF_HOUR: Cutoff hour after which sending stops in IST (default: 10)
+    - DAILY_EMAIL_SCHEDULER_TIME (or DAILY_EMAIL_SCHEDULER_START_HOUR): e.g. '11:30' or '6' (IST)
+    - DAILY_EMAIL_CUTOFF_TIME (or DAILY_EMAIL_CUTOFF_HOUR): e.g. '16:00' or '10' (IST)
     - DAILY_EMAIL_CHECK_INTERVAL_SECONDS: Polling interval in seconds (default: 600 = 10 min)
     """
     try:
-        start_hour = int(os.getenv("DAILY_EMAIL_SCHEDULER_START_HOUR", "6"))
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
     except Exception:
-        start_hour = 6
+        pass
 
+    start_str = os.getenv("DAILY_EMAIL_SCHEDULER_TIME") or os.getenv("DAILY_EMAIL_SCHEDULER_START_HOUR", "11:30")
+    start_str = str(start_str).strip()
     try:
-        cutoff_hour = int(os.getenv("DAILY_EMAIL_CUTOFF_HOUR", "10"))
+        if ":" in start_str:
+            parts = start_str.split(":")
+            start_hour, start_minute = int(parts[0]), int(parts[1])
+        else:
+            start_hour, start_minute = int(start_str), 0
     except Exception:
-        cutoff_hour = 10
+        start_hour, start_minute = 11, 30
+
+    cutoff_str = os.getenv("DAILY_EMAIL_CUTOFF_TIME") or os.getenv("DAILY_EMAIL_CUTOFF_HOUR", "16:00")
+    cutoff_str = str(cutoff_str).strip()
+    try:
+        if ":" in cutoff_str:
+            parts = cutoff_str.split(":")
+            cutoff_hour, cutoff_minute = int(parts[0]), int(parts[1])
+        else:
+            cutoff_hour, cutoff_minute = int(cutoff_str), 0
+    except Exception:
+        cutoff_hour, cutoff_minute = 16, 0
 
     try:
         check_interval = int(os.getenv("DAILY_EMAIL_CHECK_INTERVAL_SECONDS", "600"))
@@ -259,8 +277,12 @@ def get_daily_email_scheduler_config() -> dict:
         check_interval = 600
 
     return {
+        "start_time_str": f"{start_hour:02d}:{start_minute:02d}",
+        "cutoff_time_str": f"{cutoff_hour:02d}:{cutoff_minute:02d}",
         "start_hour": start_hour,
+        "start_minute": start_minute,
         "cutoff_hour": cutoff_hour,
+        "cutoff_minute": cutoff_minute,
         "check_interval": check_interval
     }
 
@@ -272,7 +294,7 @@ def send_daily_emails_to_all_subscribers(
 ) -> dict:
     """
     Main Daily Email Scheduler Job:
-    1. Enforces the morning dispatch window (06:00 IST - 10:00 IST).
+    1. Enforces the morning dispatch window (e.g. 11:30 IST - 16:00 IST).
        After the cutoff, stops sending and logs 'skipped, data not ready' with the count.
     2. Logs missing signs once per cycle via get_missing_signs(today).
     3. For each subscriber:
@@ -291,37 +313,37 @@ def send_daily_emails_to_all_subscribers(
 
     target_date_str = str(target_date)
     config = get_daily_email_scheduler_config()
-    start_hour = config["start_hour"]
-    cutoff_hour = config["cutoff_hour"]
-    current_hour = current_time_ist.hour
+    start_tuple = (config["start_hour"], config["start_minute"])
+    cutoff_tuple = (config["cutoff_hour"], config["cutoff_minute"])
+    now_tuple = (current_time_ist.hour, current_time_ist.minute)
 
     print(f"\n{'='*70}")
-    print(f"📬 [DAILY EMAIL SCHEDULER] Dispatch poll for {target_date_str} at {current_time_ist.strftime('%H:%M:%S')} IST (Window: {start_hour}:00 - {cutoff_hour}:00 IST, force={force})...")
+    print(f"📬 [DAILY EMAIL SCHEDULER] Dispatch poll for {target_date_str} at {current_time_ist.strftime('%H:%M:%S')} IST (Window: {config['start_time_str']} - {config['cutoff_time_str']} IST, force={force})...")
 
-    # Retry window check: Poll starting at 06:00 IST, stop sending after 10:00 IST (cutoff)
+    # Retry window check: Poll starting at start_time IST, stop sending after cutoff_time IST
     if not force:
-        if current_hour < start_hour:
-            print(f"⏰ [DAILY EMAIL SCHEDULER] Current IST hour ({current_hour}:00) is before morning window ({start_hour}:00 IST). Waiting...")
+        if now_tuple < start_tuple:
+            print(f"⏰ [DAILY EMAIL SCHEDULER] Current IST time ({current_time_ist.strftime('%H:%M')}) is before dispatch window ({config['start_time_str']} IST). Waiting...")
             print(f"{'='*70}\n")
             return {
                 "status": "before_window",
-                "message": f"Before start window {start_hour}:00 IST.",
+                "message": f"Before start window {config['start_time_str']} IST.",
                 "date": target_date_str,
                 "dispatched": 0,
                 "skipped": 0,
                 "errors": 0
             }
 
-        if current_hour >= cutoff_hour:
+        if now_tuple >= cutoff_tuple:
             # Cutoff reached: Do not send stale or yesterday's content; just log "skipped, data not ready" with count
             subscribers = get_active_subscribers()
             unsent_count = sum(1 for s in subscribers if str(s.get("last_sent_date")) != target_date_str)
-            print(f"🛑 [DAILY EMAIL SCHEDULER] Cutoff hour reached ({cutoff_hour}:00 IST). Stopped sending.")
+            print(f"🛑 [DAILY EMAIL SCHEDULER] Cutoff time reached ({config['cutoff_time_str']} IST). Stopped sending.")
             print(f"   skipped, data not ready: {unsent_count}")
             print(f"{'='*70}\n")
             return {
                 "status": "cutoff_passed",
-                "message": f"Cutoff hour {cutoff_hour}:00 IST reached. Stopped sending.",
+                "message": f"Cutoff time {config['cutoff_time_str']} IST reached. Stopped sending.",
                 "date": target_date_str,
                 "skipped_data_not_ready": unsent_count,
                 "dispatched": 0,
@@ -345,10 +367,20 @@ def send_daily_emails_to_all_subscribers(
 
     # Helper get_missing_signs(today): Log once per polling cycle
     missing_signs = get_missing_signs(target_date, system="tropical")
-    if missing_signs:
-        print(f"⚠️  [DAILY EMAIL SCHEDULER] Missing signs in horoscopes table today ({target_date_str}): {', '.join(missing_signs)}")
+    if len(missing_signs) == 12:
+        print(f"⏳ [Daily Email] Today's ({target_date_str}) horoscopes are being generated. Waiting for batch to complete...")
+        return {
+            "status": "waiting_generation",
+            "date": target_date_str,
+            "dispatched": 0,
+            "skipped": len(subscribers),
+            "errors": 0,
+            "details": [{"email": s["email"], "status": "waiting_daily_generation"} for s in subscribers]
+        }
+    elif missing_signs:
+        print(f"⚠️  [Daily Email] Missing signs for {target_date_str}: {', '.join(missing_signs)}")
     else:
-        print(f"✅ [DAILY EMAIL SCHEDULER] All 12 signs ready in horoscopes table for {target_date_str}.")
+        print(f"✅ [Daily Email] All 12 signs ready for {target_date_str}.")
 
     dispatched = 0
     skipped = 0
@@ -383,7 +415,7 @@ def send_daily_emails_to_all_subscribers(
         # covering every category they selected plus cosmic_pulse.
         is_ready, missing_cats = verify_subscriber_sign_ready(sign, system, pref_cats, target_date)
         if not is_ready:
-            print(f"  ⏭️  Skipping subscriber {email} ({sign.title()} / {system}): missing categories today: {', '.join(missing_cats)}")
+            print(f"  [Daily Email] {email} ({sign.title()}): waiting for missing categories ({', '.join(missing_cats)})")
             skipped += 1
             details.append({
                 "email": email,
@@ -452,29 +484,33 @@ _email_scheduler_lock = threading.Lock()
 def _email_scheduler_worker():
     """
     Background worker:
-    Runs one-time verification on server startup: checks if within morning window (06:00 - 10:00 IST),
-    dispatches daily emails to unsent subscribers if applicable, and terminates.
+    Runs dispatch checks during the configured window (e.g. 11:30 - 16:00 IST),
+    dispatches daily emails to unsent subscribers, and runs continuously every day.
     """
     config = get_daily_email_scheduler_config()
-    print(f"[Daily Email Scheduler] Background thread initialized (Window: {config['start_hour']:02d}:00 - {config['cutoff_hour']:02d}:00 IST).")
+    print(f"[Daily Email Scheduler] Background thread initialized (Window: {config['start_time_str']} - {config['cutoff_time_str']} IST, interval: {config['check_interval']}s).")
     time.sleep(6)
 
     try:
         now_ist = get_now_ist()
         today_date = now_ist.date()
-        if config["start_hour"] <= now_ist.hour < config["cutoff_hour"]:
+        now_tuple = (now_ist.hour, now_ist.minute)
+        start_tuple = (config["start_hour"], config["start_minute"])
+        cutoff_tuple = (config["cutoff_hour"], config["cutoff_minute"])
+
+        if start_tuple <= now_tuple < cutoff_tuple:
             send_daily_emails_to_all_subscribers(force=False, current_time_ist=now_ist)
-        elif now_ist.hour >= config["cutoff_hour"]:
-            print(f"[Daily Email Scheduler] Cutoff hour ({config['cutoff_hour']}:00 IST) has passed for {today_date}. Email dispatch window closed for today.")
+        elif now_tuple >= cutoff_tuple:
+            print(f"[Daily Email Scheduler] Cutoff time ({config['cutoff_time_str']} IST) has passed for {today_date}. Email dispatch window closed for today.")
         else:
-            print(f"[Daily Email Scheduler] Current IST time ({now_ist.strftime('%H:%M:%S')}) is before morning window ({config['start_hour']:02d}:00 IST).")
+            print(f"[Daily Email Scheduler] Current IST time ({now_ist.strftime('%H:%M:%S')}) is before morning window ({config['start_time_str']} IST).")
     except Exception as e:
         print(f"[Daily Email Scheduler] Worker execution error: {e}")
 
-    # Single-run mode: defaults to True so email scheduler runs only one time per server start
-    run_once = os.getenv("DAILY_EMAIL_RUN_ONCE", "true").lower() in ("true", "1", "yes")
+    # Single-run mode: defaults to False so email scheduler runs continuously every day
+    run_once = os.getenv("DAILY_EMAIL_RUN_ONCE", os.getenv("DAILY_INSIGHTS_RUN_ONCE", "false")).lower() in ("true", "1", "yes")
     if run_once:
-        print("[Daily Email Scheduler] One-time execution completed successfully. Scheduler thread stopped.")
+        print("[Daily Email Scheduler] One-time execution completed. Scheduler thread stopped.")
         return
 
     last_cutoff_logged_date = None
@@ -484,12 +520,16 @@ def _email_scheduler_worker():
         try:
             now_ist = get_now_ist()
             today_date = now_ist.date()
-            # Send daily emails during 06:00 IST - 10:00 IST morning window
-            if config["start_hour"] <= now_ist.hour < config["cutoff_hour"]:
+            now_tuple = (now_ist.hour, now_ist.minute)
+            start_tuple = (config["start_hour"], config["start_minute"])
+            cutoff_tuple = (config["cutoff_hour"], config["cutoff_minute"])
+
+            # Send daily emails during configured IST window
+            if start_tuple <= now_tuple < cutoff_tuple:
                 send_daily_emails_to_all_subscribers(force=False, current_time_ist=now_ist)
-            elif now_ist.hour >= config["cutoff_hour"]:
+            elif now_tuple >= cutoff_tuple:
                 if last_cutoff_logged_date != today_date:
-                    print(f"[Daily Email Scheduler] Cutoff hour reached ({config['cutoff_hour']}:00 IST) for {today_date}. Email dispatch window closed for today.")
+                    print(f"[Daily Email Scheduler] Cutoff time reached ({config['cutoff_time_str']} IST) for {today_date}. Email dispatch window closed for today.")
                     last_cutoff_logged_date = today_date
             time.sleep(sleep_seconds)
         except Exception as e:

@@ -126,6 +126,50 @@ def clean_text(text: str) -> str:
     return "\n\n".join(paragraphs)
 
 
+def ensure_complete_sentences(text: str) -> str:
+    """
+    Ensures that prediction text consists strictly of complete sentences:
+    - If the text ends on a dangling conjunction or preposition (chopped mid-sentence),
+      it trims back to the last complete sentence.
+    - If it ends on a complete word/thought without a period, it appends a period.
+    - Guarantees each paragraph ends with a valid terminal punctuation mark (. ! ?).
+    """
+    if not text:
+        return text
+
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n+', text) if p.strip()]
+    cleaned_paras = []
+    terminal_puncts = ('.', '!', '?', '"', "'", '।')
+    dangling_words = {
+        'and', 'or', 'but', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of',
+        'with', 'by', 'as', 'is', 'are', 'was', 'were', 'will', 'be', 'while', 'because',
+        'that', 'which', 'who', 'whom', 'whose', 'if', 'when', 'where', 'so', 'than'
+    }
+
+    for p in paragraphs:
+        p = p.strip()
+        if not p:
+            continue
+
+        if not p.endswith(terminal_puncts):
+            words_in_p = p.split()
+            last_word = words_in_p[-1].lower().strip(',;:') if words_in_p else ''
+            # If the last word is a dangling conjunction or preposition, it was cut mid-sentence!
+            if last_word in dangling_words:
+                last_punct_idx = max(p.rfind('.'), p.rfind('!'), p.rfind('?'), p.rfind('।'))
+                if last_punct_idx != -1:
+                    p = p[:last_punct_idx + 1].strip()
+                else:
+                    p = p + '.'
+            else:
+                # If it ended on a normal noun/adjective/verb, it's a complete sentence missing a period
+                p = p.rstrip(',;:- ') + '.'
+
+        cleaned_paras.append(p)
+
+    return "\n\n".join(cleaned_paras)
+
+
 class HoroscopeCategoryItem(BaseModel):
     category: Literal[
         "cosmic_pulse", "health", "wealth", "relationship",
@@ -138,13 +182,18 @@ class HoroscopeCategoryItem(BaseModel):
     affirmation: str = Field(description="Empowering affirmation sentence")
     tip_for_the_day: Optional[str] = Field(
         default=None,
-        description="Actionable single-sentence tip (8-20 words) for cosmic_pulse only"
+        description="Actionable single-sentence tip for cosmic_pulse only"
     )
     period: Optional[str] = Field(default=None)
 
     @model_validator(mode="after")
     def validate_category_item(self):
         v = self.text
+        # Clean text and ensure all sentences are complete
+        v = clean_text(v)
+        v = ensure_complete_sentences(v)
+        self.text = v
+
         p_key = (self.period or "").lower().strip()
 
         # 1. Prohibited markdown and format checks
@@ -159,28 +208,25 @@ class HoroscopeCategoryItem(BaseModel):
         if re.search(r'[\U00010000-\U0010FFFF\u2600-\u27BF\u2300-\u23FF\u2B50]', v):
             raise ValueError("Text contains prohibited emojis")
 
-        # 2. Paragraph & word count validation
-        paragraphs = [p.strip() for p in re.split(r'\n\s*\n+', v.strip()) if p.strip()]
-        if p_key in PERIOD_RULES:
-            rule = PERIOD_RULES[p_key]
-            min_p, max_p = rule["paragraphs"]
-            if not (min_p <= len(paragraphs) <= max_p):
-                raise ValueError(
-                    f"For period '{p_key}', expected {min_p}-{max_p} paragraphs separated by '\\n\\n', got {len(paragraphs)}."
-                )
+        # 2. Quality & complete sentence validation (Flexible word count)
+        words = v.split()
+        word_count = len(words)
+        if word_count < 25:
+            raise ValueError(
+                f"Prediction text is too brief ({word_count} words). Minimum 25 words required for a meaningful forecast."
+            )
 
-            words = v.split()
-            word_count = len(words)
-            min_w = int(rule["min_words"] * (1 - rule["tolerance"]))
-            max_w = int(rule["max_words"] * (1 + rule["tolerance"]))
-            if not (min_w <= word_count <= max_w):
-                raise ValueError(
-                    f"For period '{p_key}', word count must be between {min_w} and {max_w} words with 10% tolerance (got {word_count} words)."
-                )
-        else:
-            # If period not explicitly passed, enforce max 3 paragraphs
-            if len(paragraphs) > 3:
-                raise ValueError(f"Text contains {len(paragraphs)} paragraphs; maximum 3 paragraphs allowed.")
+        paragraphs = [p.strip() for p in re.split(r'\n\s*\n+', v.strip()) if p.strip()]
+        if len(paragraphs) < 1:
+            raise ValueError("Prediction must contain at least 1 paragraph.")
+        if len(paragraphs) > 6:
+            raise ValueError(f"Text contains {len(paragraphs)} paragraphs; maximum 6 paragraphs allowed.")
+
+        # Ensure every single paragraph ends as a complete sentence
+        terminal_puncts = ('.', '!', '?', '"', "'", '।')
+        for p in paragraphs:
+            if not p.endswith(terminal_puncts):
+                raise ValueError("Every paragraph must end as a complete sentence with terminal punctuation (. ! ?).")
 
         # 3. Tip for cosmic_pulse
         cat = self.category
@@ -204,17 +250,12 @@ class HoroscopeCategoryItem(BaseModel):
                 if re.search(p_pat, clean_tip, re.IGNORECASE):
                     raise ValueError(f"tip_for_the_day must not mention planets: detected '{p_pat}' in '{clean_tip}'")
 
-            body_without_end_punct = clean_tip.rstrip('.!?')
-            inner_sentences = [s.strip() for s in re.split(r'[.!?]+', body_without_end_punct) if s.strip()]
-            if len(inner_sentences) > 1:
-                raise ValueError(f"tip_for_the_day must be exactly ONE sentence, found {len(inner_sentences)}: '{clean_tip}'")
-
-            words = clean_tip.split()
-            if len(words) < 8 or len(words) > 20:
-                raise ValueError(f"tip_for_the_day word count must be between 8 and 20 words (got {len(words)} words): '{clean_tip}'")
-
             if not clean_tip.endswith(('.', '!', '?')):
                 clean_tip += '.'
+
+            words = clean_tip.split()
+            if len(words) < 4:
+                raise ValueError(f"tip_for_the_day is too short (got {len(words)} words): '{clean_tip}'")
 
             self.tip_for_the_day = clean_tip
         else:
@@ -229,34 +270,8 @@ class HoroscopeGenerationResponse(BaseModel):
 
 def _call_llm_api(system_prompt: str, user_prompt: str, max_tokens: int = None) -> str:
     """
-    Executes the LLM request.
-    Uses Anthropic Claude API if ANTHROPIC_API_KEY is available,
-    otherwise uses the configured active LLM from services.llm_service.
+    Executes the LLM request using the active LLM configured in Admin Settings.
     """
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    if anthropic_key:
-        try:
-            import requests
-            headers = {
-                "x-api-key": anthropic_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            }
-            body = {
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": max_tokens or 4000,
-                "temperature": 0.2,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": user_prompt}]
-            }
-            resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=body, timeout=90)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["content"][0]["text"]
-        except Exception as e:
-            print(f"[Claude API Fallback Notice] Claude API error ({e}), delegating to system LLM service.")
-
-    # Fallback to configured LLM in backend
     from services.llm_service import _execute_llm
     history = [{"role": "user", "content": user_prompt}]
     return _execute_llm(system_prompt, history, max_tokens=max_tokens)
@@ -509,8 +524,11 @@ def _extract_json_items(raw_response: str, period_key: str, sign_hint: str = "Ta
             import json_repair
             parsed_dict = json_repair.loads(cleaned)
         except Exception:
-            import json_repair
-            parsed_dict = json_repair.repair_json(raw_response, return_objects=True)
+            try:
+                import json_repair
+                parsed_dict = json_repair.repair_json(raw_response, return_objects=True)
+            except Exception:
+                pass
 
     if isinstance(parsed_dict, list):
         parsed_dict = {"items": parsed_dict}
