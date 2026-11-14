@@ -346,13 +346,15 @@ def _validate_translation(
         if len(fr_matches) < 3:
             return False, "French stop words or accented characters missing"
 
-    # 4. Word count ratio: 60% - 170% of English word count
+    # 4. Word count ratio: 60% - 170% of English word count (with agglutination tolerance for Tamil)
     eng_words = len(eng_text.split())
     trans_words = len(trans_text.split())
 
     if eng_words >= 15:
+        min_ratio = 0.40 if lang == "ta" else 0.55
+        max_ratio = 1.75
         ratio = trans_words / float(eng_words)
-        if ratio < 0.55 or ratio > 1.75:
+        if ratio < min_ratio or ratio > max_ratio:
             return False, f"Word count ratio outside bounds: {ratio:.2f} ({trans_words} vs {eng_words} words)"
 
     return True, ""
@@ -402,17 +404,37 @@ DO NOT include any explanation or text outside the JSON object."""
     payload = {}
     for it in items_chunk:
         cat = it.get("category", "")
-        payload[cat] = {
-            "text": it.get("text") or "",
-            "remedy": it.get("remedy") or "",
-            "affirmation": it.get("affirmation") or "",
-            "lucky_time": it.get("lucky_time") or "",
-            "tip_for_the_day": it.get("tip_for_the_day") or "",
-        }
+        cat_payload = {"text": it.get("text") or ""}
+        for fld in ("remedy", "affirmation", "lucky_time", "tip_for_the_day"):
+            val = it.get(fld)
+            if val and str(val).strip():
+                cat_payload[fld] = str(val).strip()
+        payload[cat] = cat_payload
 
     user_prompt = f"Translate the following {meta.get('period', 'daily')} horoscope items for {meta.get('sign', 'sign')} ({meta.get('system', 'tropical')} system) into {target_lang}:\n\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
 
     return system_prompt, user_prompt
+
+
+def _try_repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
+    """Attempts to salvage completed category objects from a truncated JSON string."""
+    text = text.strip()
+    if not text.startswith("{"):
+        return None
+    repaired = {}
+    # Matches top-level "category": { ... }
+    pattern = r'"([a-zA-Z0-9_]+)"\s*:\s*(\{[^{}]*\})'
+    for match in re.finditer(pattern, text):
+        cat = match.group(1)
+        try:
+            val = json.loads(match.group(2))
+            if isinstance(val, dict) and "text" in val:
+                repaired[cat] = val
+        except Exception:
+            pass
+    if repaired:
+        return repaired
+    return None
 
 
 def _execute_mistral_chunk(
@@ -420,13 +442,9 @@ def _execute_mistral_chunk(
     lang: str,
     meta: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """Calls Mistral Cloud API with JSON object response mode and retry."""
-    base_url = get_setting("MISTRAL_CLOUD_URL", "https://api.mistral.ai").rstrip("/")
-    api_key = get_setting("MISTRAL_CLOUD_API_KEY", "")
-    model = get_setting("MISTRAL_MODEL", "ministral-3b-2512")
-    if not api_key:
-        print("[Landing Translation Error] MISTRAL_CLOUD_API_KEY is not configured.")
-        return None
+    """Calls configured admin LLM engine through services.llm_service with JSON object response mode and retry."""
+    from services.llm_service import _execute_llm
+    from services.settings_service import get_setting
 
     period = meta.get("period", "daily")
     # Indic scripts use higher token density
@@ -439,65 +457,46 @@ def _execute_mistral_chunk(
     max_tokens = max_tokens_map.get(period, 4000)
 
     system_prompt, user_prompt = _build_translation_prompt(items_chunk, lang, meta)
-    messages = [
-        {"role": "system", "content": system_prompt},
+    history = [
         {"role": "user", "content": user_prompt}
     ]
 
     for attempt in range(1, MAX_RETRIES + 1):
         start_t = time.time()
-        resp = None
         try:
-            resp = requests.post(
-                f"{base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "Connection": "close"
-                },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.1,
-                    "max_tokens": max_tokens,
-                    "response_format": {"type": "json_object"}
-                },
-                timeout=60
-            )
-
+            content = _execute_llm(system_prompt, history, max_tokens=max_tokens)
             latency = time.time() - start_t
 
-            if resp.status_code != 200:
-                print(f"[Landing Translation Warning] Mistral HTTP {resp.status_code} (attempt {attempt}): {resp.text[:180]}")
-                time.sleep(1.0 * attempt)
-                continue
-
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            usage = data.get("usage", {})
-            prompt_toks = usage.get("prompt_tokens", 0)
-            comp_toks = usage.get("completion_tokens", 0)
+            active_llm = get_setting("ACTIVE_LLM", "mistral_cloud").strip().lower()
+            model_name = get_setting(f"{active_llm.upper()}_MODEL", "default")
 
             with _CALL_STATS["lock"]:
                 _CALL_STATS["total_calls"] += 1
-                _CALL_STATS["total_prompt_tokens"] += prompt_toks
-                _CALL_STATS["total_completion_tokens"] += comp_toks
 
-            print(f"[Landing Translation API] Lang: {lang} | Sign: {meta.get('sign')} | Period: {period} | Categories: {[it.get('category') for it in items_chunk]} | Tokens: {prompt_toks}+{comp_toks}={prompt_toks+comp_toks} | Time: {latency:.2f}s")
+            print(f"[Landing Translation API] Lang: {lang} | Sign: {meta.get('sign')} | System: {meta.get('system')} | Period: {period} | Categories: {[it.get('category') for it in items_chunk]} | Model: {model_name} | Provider: {active_llm} | Time: {latency:.2f}s")
 
-            # Parse JSON
-            parsed = json.loads(content)
-            if not isinstance(parsed, dict):
-                raise ValueError("Parsed translation output is not a JSON object")
+            # Clean output if wrapped in markdown code fence
+            clean_content = content.strip() if content else ""
+            if clean_content.startswith("```"):
+                clean_content = re.sub(r"^```[a-zA-Z]*\n?", "", clean_content)
+                clean_content = re.sub(r"\n?```$", "", clean_content).strip()
 
-            return parsed
+            try:
+                parsed = json.loads(clean_content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Parsed translation output is not a JSON object")
+                return parsed
+            except (json.JSONDecodeError, ValueError) as json_err:
+                print(f"[Landing Translation Warning] JSON parsing issue (attempt {attempt}): {json_err}. Attempting salvage...")
+                salvaged = _try_repair_truncated_json(clean_content)
+                if salvaged:
+                    print(f"[Landing Translation Salvage] Successfully salvaged {len(salvaged)} categories from truncated output.")
+                    return salvaged
+                raise
 
-        except (json.JSONDecodeError, KeyError, IndexError, requests.RequestException) as err:
+        except Exception as err:
             print(f"[Landing Translation Error] Attempt {attempt} failed: {err}")
             time.sleep(1.0 * attempt)
-        finally:
-            if resp is not None:
-                resp.close()
 
     return None
 
