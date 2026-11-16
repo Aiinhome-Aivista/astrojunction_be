@@ -128,6 +128,8 @@ def post_interpret():
         from services.llm_service import get_interpret_response
         interpretation = get_interpret_response(profile, tradition, chart_data, numerology, language)
         duration_ms = int((time.time() - start_time) * 1000)
+        import json
+        interp_str = json.dumps(interpretation, ensure_ascii=False) if isinstance(interpretation, dict) else str(interpretation or "")
 
         if session_id:
             try:
@@ -139,7 +141,7 @@ def post_interpret():
                     user_id=user_id,
                     input_payload={"tradition": tradition, "language": language, "name": profile.get("fullName")},
                     status="SUCCESS",
-                    result_summary={"textLength": len(interpretation or ""), "preview": (interpretation or "")[:120]},
+                    result_summary={"textLength": len(interp_str), "preview": interp_str[:120]},
                     execution_time_ms=duration_ms,
                     ip_address=request.remote_addr,
                     user_agent=request.headers.get("User-Agent")

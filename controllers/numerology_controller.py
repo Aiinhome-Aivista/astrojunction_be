@@ -1,8 +1,19 @@
 import uuid
 import json
+import hashlib
+import threading
 from flask import request, jsonify
 
 from database.db_connection import call_procedure
+
+# Thread-safe in-memory cache keyed by (input hash, lang)
+_NUMEROLOGY_INSIGHTS_CACHE = {}
+_numerology_cache_lock = threading.Lock()
+
+def _get_numerology_cache_key(mulank, bhagyank, namank, missing_numbers, language: str) -> str:
+    norm_missing = sorted([int(x) for x in (missing_numbers or []) if str(x).isdigit()])
+    raw_key = f"{mulank}_{bhagyank}_{namank}_{norm_missing}_{language.strip().lower()}"
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 def _error(message, code, http_status=400):
@@ -96,17 +107,31 @@ def get_dynamic_insights():
     bhagyank = body.get("bhagyank")
     namank = body.get("namank")
     missing_numbers = body.get("missingNumbers", [])
-    language = body.get("language", "en")
+    language = (body.get("language") or "en").strip().lower()
     
+    if language not in ("en", "hi", "bn", "ta", "fr"):
+        return _error("Invalid language parameter. Supported: en, hi, bn, ta, fr", "INVALID_LANG", 400)
+
     if mulank is None or bhagyank is None:
         return _error("mulank and bhagyank are required", "VALIDATION_ERROR")
-        
+
+    cache_key = _get_numerology_cache_key(mulank, bhagyank, namank, missing_numbers, language)
+    with _numerology_cache_lock:
+        if cache_key in _NUMEROLOGY_INSIGHTS_CACHE:
+            return jsonify({
+                "status": "success",
+                "data": _NUMEROLOGY_INSIGHTS_CACHE[cache_key],
+                "cached": True
+            })
+
     try:
         from services.llm_service import get_numerology_insights_response
         json_res = get_numerology_insights_response(mulank, bhagyank, namank, missing_numbers, language)
         import json
         insights_data = json.loads(json_res)
-        return jsonify({"status": "success", "data": insights_data})
+        with _numerology_cache_lock:
+            _NUMEROLOGY_INSIGHTS_CACHE[cache_key] = insights_data
+        return jsonify({"status": "success", "data": insights_data, "cached": False})
     except Exception as e:
         print(f"Error in get_dynamic_insights: {e}")
         return _error(str(e), "LLM_ERROR", 500)

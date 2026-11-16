@@ -3,6 +3,34 @@ from database.db_connection import get_db_connection
 import json
 import uuid
 
+PLAN_CODE_MAP = {
+    'daily_vedic_subscription': 'parashari_synthesis',
+    'birth_chart_subscription': 'parashari_synthesis',
+    'matchmaking_regenerate_subscription': 'matchmaking_counsel',
+    'roadmap_5_subscription': 'roadmap_5',
+    'roadmap_10_subscription': 'roadmap_10',
+    'roadmap_15_subscription': 'roadmap_15',
+    'roadmap_20_subscription': 'roadmap_20',
+    'roadmap_25_subscription': 'roadmap_25',
+}
+
+def _enrich_plan_codes(p):
+    plan_id = p.get('id') or ''
+    p_name = (p.get('plan_name') or '').lower()
+    code = PLAN_CODE_MAP.get(plan_id)
+    if not code:
+        if '25-year' in p_name or 'master life' in p_name: code = 'roadmap_25'
+        elif '20-year' in p_name: code = 'roadmap_20'
+        elif '15-year' in p_name: code = 'roadmap_15'
+        elif '10-year' in p_name: code = 'roadmap_10'
+        elif '5-year' in p_name: code = 'roadmap_5'
+        elif 'matchmaking' in p_name or 'synastry' in p_name: code = 'matchmaking_counsel'
+        elif 'parashari' in p_name or 'vedic synthesis' in p_name: code = 'parashari_synthesis'
+        else: code = plan_id or 'parashari_synthesis'
+    p['plan_code'] = code
+    feats = p.get('features_json') or []
+    p['feature_codes'] = [f"{code}_feat_{i+1}" for i in range(len(feats))]
+
 def _manage_subscription(action, plan_id=None, data=None):
     conn = None
     cursor = None
@@ -22,13 +50,14 @@ def _manage_subscription(action, plan_id=None, data=None):
                 plans = [p for p in plans if p.get('plan_type') == filter_type]
             
             
-            # parse json
+            # parse json and enrich codes
             for p in plans:
                 if p.get('features_json'):
                     try:
                         p['features_json'] = json.loads(p['features_json'])
                     except:
                         pass
+                _enrich_plan_codes(p)
             return jsonify({"status": "success", "data": plans}), 200
 
         elif action == 'get_all':
@@ -43,6 +72,7 @@ def _manage_subscription(action, plan_id=None, data=None):
                         p['features_json'] = json.loads(p['features_json'])
                     except:
                         pass
+                _enrich_plan_codes(p)
             return jsonify({"status": "success", "data": plans}), 200
 
         elif action in ['create', 'update']:

@@ -1,18 +1,31 @@
 from flask import request, jsonify
 import json
+import hashlib
 import threading
 from datetime import datetime
 from services.llm_service import get_daily_insights_response
-from services.ephemeris_service import calculate_panchang_data
+from services.ephemeris_service import calculate_panchang_data, get_day_stable_panchang_facts
 
 # Thread-safe in-memory cache to enforce single daily reading generation per user/profile
+# Key format: f"{profile_id}_{date_str}_{facts_hash}"
 DAILY_HOROSCOPE_CACHE = {}
 _cache_lock = threading.Lock()
+# Daily forceRefresh counter per profile (key: f"{profile_id}_{date_str}")
+_REFRESH_COUNTS = {}
 
-def _get_cache_key(profile: dict, panchang: dict) -> str:
-    profile_id = str(profile.get("id") or profile.get("fullName") or profile.get("birthDate") or "anonymous").strip().lower()
-    date_str = str(panchang.get("date") or datetime.utcnow().strftime("%Y-%m-%d")).strip()
-    return f"{profile_id}_{date_str}"
+def _evict_old_cache_entries(current_date_str: str):
+    """Evicts cache and rate-limit entries from previous dates to keep memory bounded."""
+    keys_to_evict = [k for k, v in list(DAILY_HOROSCOPE_CACHE.items()) if v.get("date") != current_date_str]
+    for k in keys_to_evict:
+        DAILY_HOROSCOPE_CACHE.pop(k, None)
+    refresh_keys_to_evict = [k for k in list(_REFRESH_COUNTS.keys()) if not k.endswith(f"_{current_date_str}")]
+    for k in refresh_keys_to_evict:
+        _REFRESH_COUNTS.pop(k, None)
+
+def _compute_facts_hash(score: int, sunrise_tithi: str, sunrise_nakshatra: str, sunrise_ascendant: str) -> str:
+    """Computes a 12-char SHA-256 hash strictly from day-stable astronomical values."""
+    raw = f"{score}_{sunrise_tithi}_{sunrise_nakshatra}_{sunrise_ascendant}".strip().lower()
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 def calculate_ephemeris_panchang():
     import time
@@ -67,14 +80,55 @@ def daily_horoscope():
     panchang = data.get("panchang", {})
     numerology = data.get("numerology", {})
 
-    cache_key = _get_cache_key(profile, panchang)
+    target_lang = str(data.get("lang") or "en").strip().lower()
+    if target_lang not in ["en", "hi", "bn", "ta", "fr"]:
+        return jsonify({"status": "error", "message": "Invalid language. Supported: en, hi, bn, ta, fr"}), 400
 
-    # Check if already generated today for this profile
+    date_str = str(panchang.get("date") or datetime.utcnow().strftime("%Y-%m-%d")).strip()
+    lat = float(profile.get("latitude") or 28.6139)
+    lon = float(profile.get("longitude") or 77.209)
+    tz_offset = float(profile.get("timezoneOffset") or 5.5)
+    mulank = int(numerology.get("mulank") or 1)
+
+    # Compute day-stable facts strictly from sunrise ephemeris
+    day_facts = get_day_stable_panchang_facts(date_str, lat, lon, tz_offset, mulank)
+    score = day_facts["auspiciousScore"]
+    band_code = day_facts.get("bandCode", "balanced")
+    sunrise_tithi = day_facts["tithiName"]
+    sunrise_nak = day_facts["nakshatraName"]
+    sunrise_asc = day_facts["sunriseAscendant"]
+
+    profile_id = str(profile.get("id") or profile.get("fullName") or profile.get("birthDate") or "anonymous").strip().lower()
+    facts_hash = _compute_facts_hash(score, sunrise_tithi, sunrise_nak, sunrise_asc)
+    cache_key = f"{profile_id}_{date_str}_{facts_hash}_{target_lang}"
+
+    force_refresh = bool(data.get("forceRefresh"))
+
     with _cache_lock:
-        if cache_key in DAILY_HOROSCOPE_CACHE:
+        # Evict cache entries from previous dates
+        _evict_old_cache_entries(date_str)
+
+        # Rate-limit forceRefresh: admin-only or maximum 3 times per profile per day across all languages
+        if force_refresh:
+            is_admin = bool(profile.get("role") == "admin" or profile.get("isAdmin") is True)
+            if not is_admin:
+                refresh_key = f"{profile_id}_{date_str}"
+                count = _REFRESH_COUNTS.get(refresh_key, 0)
+                if count >= 3:
+                    force_refresh = False
+                else:
+                    _REFRESH_COUNTS[refresh_key] = count + 1
+
+        # Check if already generated today with these exact day-stable facts and language
+        if not force_refresh and cache_key in DAILY_HOROSCOPE_CACHE:
+            cached_entry = DAILY_HOROSCOPE_CACHE[cache_key]
             return jsonify({
                 "status": "success",
-                "insights": DAILY_HOROSCOPE_CACHE[cache_key],
+                "insights": cached_entry.get("insights", cached_entry),
+                "auspiciousScore": score,
+                "bandCode": band_code,
+                "sunriseAscendant": sunrise_asc,
+                "lang": target_lang,
                 "cached": True,
                 "message": "Daily reading retrieved from cache (single generation per day allowed)."
             })
@@ -82,11 +136,18 @@ def daily_horoscope():
     try:
         from services.settings_service import get_setting
         active_engine = get_setting("ACTIVE_LLM", "not_set")
-        print(f"\n[DailyHoroscope API] Generating insights for: '{profile.get('fullName', 'User')}' | Provider in use: [{active_engine.upper()}]")
-        json_res = get_daily_insights_response(profile, chart_data, panchang, numerology)
+        print(f"\n[DailyHoroscope API] Generating insights for: '{profile.get('fullName', 'User')}' | Lang: [{target_lang}] | Provider: [{active_engine.upper()}] | Sunrise Ascendant: [{sunrise_asc}] | Day Score: [{score}]")
+        json_res = get_daily_insights_response(profile, chart_data, panchang, numerology, day_facts=day_facts, target_lang=target_lang)
         insights = json.loads(json_res)
         with _cache_lock:
-            DAILY_HOROSCOPE_CACHE[cache_key] = insights
+            DAILY_HOROSCOPE_CACHE[cache_key] = {
+                "insights": insights,
+                "date": date_str,
+                "auspiciousScore": score,
+                "bandCode": band_code,
+                "lang": target_lang,
+                "timestamp": time.time()
+            }
 
         session_id = request.headers.get("x-session-id")
         if session_id:
@@ -96,7 +157,7 @@ def daily_horoscope():
                     session_id=session_id,
                     event_name="DAILY_HOROSCOPE_GENERATION",
                     event_category="AI_CHAT",
-                    input_payload={"name": profile.get("fullName"), "rashi": profile.get("horoscopeSystem")},
+                    input_payload={"name": profile.get("fullName"), "rashi": profile.get("horoscopeSystem"), "lang": target_lang},
                     status="SUCCESS",
                     result_summary={"engine": active_engine, "summary": (insights.get("summary") or "")[:150]},
                     execution_time_ms=int((time.time() - start_time) * 1000),
@@ -109,6 +170,10 @@ def daily_horoscope():
         return jsonify({
             "status": "success",
             "insights": insights,
+            "auspiciousScore": score,
+            "bandCode": band_code,
+            "sunriseAscendant": sunrise_asc,
+            "lang": target_lang,
             "cached": False,
             "message": "Daily reading successfully generated."
         })

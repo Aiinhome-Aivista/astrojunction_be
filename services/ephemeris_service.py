@@ -23,6 +23,76 @@ def get_julian_day_ut(date_str, time_str, timezone_offset):
     except Exception as e:
         raise ValueError(f"Invalid date/time format: {e}")
 
+def get_day_stable_panchang_facts(date_str, lat=28.6139, lon=77.209, timezone_offset=5.5, mulank=1):
+    """
+    Computes 100% day-stable astronomical panchang facts evaluated at sunrise.
+    Guarantees that the auspicious score, sunrise ascendant, sunrise tithi,
+    and sunrise nakshatra remain constant throughout the day regardless of request time.
+    """
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+    flags = swe.FLG_SIDEREAL | swe.FLG_SWIEPH | swe.FLG_SPEED
+
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    year, month, day = dt.year, dt.month, dt.day
+    day_of_year = (dt - datetime(year, 1, 1)).days
+
+    from services.astro_utils import calculate_sun_times_and_muhurtas
+    timings = calculate_sun_times_and_muhurtas(year, month, day, lat, lon, timezone_offset)
+
+    sunrise_str = timings.get("sunrise", "06:00 AM")
+    try:
+        sunrise_dt = datetime.strptime(f"{date_str} {sunrise_str}", "%Y-%m-%d %I:%M %p")
+        sunrise_time_24 = sunrise_dt.strftime("%H:%M")
+    except Exception:
+        sunrise_time_24 = "06:00"
+
+    jd_sunrise_ut = get_julian_day_ut(date_str, sunrise_time_24, timezone_offset)
+
+    sun_res, _ = swe.calc_ut(jd_sunrise_ut, swe.SUN, flags)
+    moon_res, _ = swe.calc_ut(jd_sunrise_ut, swe.MOON, flags)
+    sun_lon = sun_res[0]
+    moon_lon = moon_res[0]
+
+    diff = (moon_lon - sun_lon) % 360
+    tithi_idx = int(diff / 12)
+    nak_idx = int(moon_lon / (40.0 / 3.0))
+
+    auspicious_score = 50 + ((tithi_idx * 3 + nak_idx * 2 + day_of_year) % 50)
+    if auspicious_score >= 80:
+        band_code = "high"
+    elif auspicious_score >= 60:
+        band_code = "balanced"
+    elif auspicious_score >= 40:
+        band_code = "mixed"
+    else:
+        band_code = "low"
+
+    cusps, ascmc = swe.houses(jd_sunrise_ut, lat, lon, b'W')
+    aya = swe.get_ayanamsa_ut(jd_sunrise_ut)
+    sid_asc = (ascmc[0] - aya) % 360.0
+    signs = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces']
+    sunrise_asc_sign = signs[int(sid_asc // 30) % 12]
+
+    from services.calendar_service import TITHIS, NAKSHATRAS
+    tithi_name = TITHIS[tithi_idx % len(TITHIS)]
+    paksha = "Shukla" if tithi_idx < 15 else "Krishna"
+    tithi_display = f"{paksha} {tithi_name}"
+    nakshatra_name = NAKSHATRAS[nak_idx % len(NAKSHATRAS)]
+
+    return {
+        "date": date_str,
+        "auspiciousScore": auspicious_score,
+        "bandCode": band_code,
+        "tithiIndex": tithi_idx,
+        "tithiName": tithi_display,
+        "nakshatraIndex": nak_idx,
+        "nakshatraName": nakshatra_name,
+        "sunriseAscendant": sunrise_asc_sign,
+        "sunriseAscendantDegree": sid_asc,
+        "timings": timings,
+        "dayOfYear": day_of_year
+    }
+
 def calculate_panchang_data(date_str, time_str, timezone_offset, lat=28.6139, lon=77.209, mulank=1):
     jd_ut = get_julian_day_ut(date_str, time_str, timezone_offset)
     
@@ -48,10 +118,10 @@ def calculate_panchang_data(date_str, time_str, timezone_offset, lat=28.6139, lo
     # Parse date
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     year, month, day = dt.year, dt.month, dt.day
-    day_of_year = (dt - datetime(year, 1, 1)).days
     
-    # Calculate Auspicious Score
-    auspicious_score = 50 + ((tithi_idx * 3 + nak_idx * 2 + day_of_year) % 50)
+    # Day-stable facts evaluated at sunrise (Score & sunrise ascendant)
+    day_facts = get_day_stable_panchang_facts(date_str, lat, lon, timezone_offset, mulank)
+    auspicious_score = day_facts["auspiciousScore"]
     
     from services.astro_utils import calculate_sun_times_and_muhurtas, get_daily_rituals, get_numerology_daily
     
@@ -72,6 +142,7 @@ def calculate_panchang_data(date_str, time_str, timezone_offset, lat=28.6139, lo
         "yogaIndex": yoga_idx,
         "nakshatraIndex": nak_idx,
         "auspiciousScore": auspicious_score,
+        "bandCode": day_facts["bandCode"],
         "timings": timings,
         "rituals": rituals,
         "luckyData": {

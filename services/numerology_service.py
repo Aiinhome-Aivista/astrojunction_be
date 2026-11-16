@@ -216,30 +216,57 @@ def calculate_numerology_report(full_name: str, dob_str: str) -> Dict[str, Any]:
         }
     ]
     
-    for plane in lo_shu_planes:
+    plane_ids = ['thought', 'will', 'action', 'mental', 'emotional', 'practical', 'raj_yoga', 'spirituality']
+    for idx, plane in enumerate(lo_shu_planes):
+        plane["id"] = plane_ids[idx] if idx < len(plane_ids) else f"plane_{idx}"
         plane["status"] = get_status(plane["strength"])
+        plane["statusCode"] = plane["status"].lower()
+        plane["meaningCode"] = f"plane_{plane['id']}_meaning"
         
     meta = MULANK_META.get(mulank, MULANK_META[1])
     
     # Name Corrections
     name_corrections = []
+    name_correction_details = []
     if namank_chaldean not in [1, 3, 5, 6]:
         name_corrections.append(f"Adjust spelling slightly (e.g. adding or modifying an 'A', 'E', or 'N') to bring Chaldean vibration to 1 (Solar Authority), 5 (Mercury Commerce), or 6 (Venus Abundance).")
         name_corrections.append(f"Your current name vibrates to Chaldean {namank_chaldean}, which may attract periodic delays in legal or financial transactions.")
+        name_correction_details.append({"code": "sug_adjust_1", "params": {}})
+        name_correction_details.append({"code": "sug_adjust_2", "params": {"n": namank_chaldean}})
     else:
         name_corrections.append(f"Your name resonates on auspicious Chaldean vibration {namank_chaldean}, in harmony with commercial prosperity and public recognition.")
+        name_correction_details.append({"code": "sug_favorable", "params": {"n": namank_chaldean}})
         
     # Remedies
     remedies = []
-    if grid_counts[1] == 0: remedies.append('Place a small indoor water fountain or image of flowing water in the North zone to activate Career & Communication flow (Number 1).')
-    if grid_counts[2] == 0: remedies.append('Keep a pair of rose quartz crystals or earthy pottery in the South-West corner to ground Relationships & Emotional balance (Number 2).')
-    if grid_counts[3] == 0: remedies.append('Introduce lush green plants or wooden artifacts in the East direction to stimulate Knowledge & Family blessings (Number 3).')
-    if grid_counts[4] == 0: remedies.append('Keep a wooden money plant or green aventurine in the South-East corner to anchor Discipline & Financial discipline (Number 4).')
-    if grid_counts[5] == 0: remedies.append('Keep the central Brahmasthan of your home open, clutter-free, and well-lit to maintain core stability and vitality (Number 5).')
-    if grid_counts[6] == 0: remedies.append('Hang a 6-rod metal wind chime or silver bowl with water in the North-West zone to magnetize Helpful Friends & Travel luck (Number 6).')
-    if grid_counts[7] == 0: remedies.append('Wear a silver bracelet or cat’s eye gemstone to boost spiritual focus, creative progeny, and mental stamina (Number 7).')
-    if grid_counts[8] == 0: remedies.append('Place 8 natural crystals or river stones in the North-East zone to enhance Wisdom & Systematic wealth accumulation (Number 8).')
-    if grid_counts[9] == 0: remedies.append('Place bright warm lighting or a red pyramid in the South zone to amplify Fame, Social recognition, and Ambition (Number 9).')
+    remedy_details = []
+    if grid_counts[1] == 0:
+        remedies.append('Place a small indoor water fountain or image of flowing water in the North zone to activate Career & Communication flow (Number 1).')
+        remedy_details.append({"id": 1, "missingNumber": 1, "code": "remedy_1"})
+    if grid_counts[2] == 0:
+        remedies.append('Keep a pair of rose quartz crystals or earthy pottery in the South-West corner to ground Relationships & Emotional balance (Number 2).')
+        remedy_details.append({"id": 2, "missingNumber": 2, "code": "remedy_2"})
+    if grid_counts[3] == 0:
+        remedies.append('Introduce lush green plants or wooden artifacts in the East direction to stimulate Knowledge & Family blessings (Number 3).')
+        remedy_details.append({"id": 3, "missingNumber": 3, "code": "remedy_3"})
+    if grid_counts[4] == 0:
+        remedies.append('Keep a wooden money plant or green aventurine in the South-East corner to anchor Discipline & Financial discipline (Number 4).')
+        remedy_details.append({"id": 4, "missingNumber": 4, "code": "remedy_4"})
+    if grid_counts[5] == 0:
+        remedies.append('Keep the central Brahmasthan of your home open, clutter-free, and well-lit to maintain core stability and vitality (Number 5).')
+        remedy_details.append({"id": 5, "missingNumber": 5, "code": "remedy_5"})
+    if grid_counts[6] == 0:
+        remedies.append('Hang a 6-rod metal wind chime or silver bowl with water in the North-West zone to magnetize Helpful Friends & Travel luck (Number 6).')
+        remedy_details.append({"id": 6, "missingNumber": 6, "code": "remedy_6"})
+    if grid_counts[7] == 0:
+        remedies.append('Wear a silver bracelet or cat’s eye gemstone to boost spiritual focus, creative progeny, and mental stamina (Number 7).')
+        remedy_details.append({"id": 7, "missingNumber": 7, "code": "remedy_7"})
+    if grid_counts[8] == 0:
+        remedies.append('Place 8 natural crystals or river stones in the North-East zone to enhance Wisdom & Systematic wealth accumulation (Number 8).')
+        remedy_details.append({"id": 8, "missingNumber": 8, "code": "remedy_8"})
+    if grid_counts[9] == 0:
+        remedies.append('Place bright warm lighting or a red pyramid in the South zone to amplify Fame, Social recognition, and Ambition (Number 9).')
+        remedy_details.append({"id": 9, "missingNumber": 9, "code": "remedy_9"})
     
     # Missing numbers array
     missing_numbers = [num for num, count in grid_counts.items() if count == 0]
@@ -249,14 +276,19 @@ def calculate_numerology_report(full_name: str, dob_str: str) -> Dict[str, Any]:
     return {
         "mulank": mulank,
         "mulankPlanet": meta["planet"],
+        "mulankPlanetId": mulank,
         "mulankCharacteristics": meta["traits"],
         "bhagyank": bhagyank,
         "bhagyankPlanet": bhagyank_meta["planet"],
+        "bhagyankPlanetId": bhagyank_reduced,
         "bhagyankMission": meta["mission"],
+        "bhagyankMissionId": mulank,
         "namankChaldean": namank_chaldean,
         "namankPythagorean": namank_pythagorean,
         "nameCompatibility": 'Highly Harmonious & Auspicious' if namank_chaldean in [1, 3, 5, 6] else 'Moderate - Minor Phonetic Adjustment Recommended',
+        "nameCompatibilityCode": 'harmonious' if namank_chaldean in [1, 3, 5, 6] else 'moderate',
         "nameCorrectionSuggestions": name_corrections,
+        "nameCorrectionDetails": name_correction_details,
         "loShuGrid": grid_counts,
         "loShuPlanes": lo_shu_planes,
         "luckyNumbers": meta["lucky"],
@@ -265,6 +297,8 @@ def calculate_numerology_report(full_name: str, dob_str: str) -> Dict[str, Any]:
         "luckyColors": meta["colors"],
         "luckyGemstones": meta["gems"],
         "remedies": remedies,
+        "remedyDetails": remedy_details,
+        "remedyCodes": missing_numbers,
         "missingNumbers": missing_numbers
     }
 

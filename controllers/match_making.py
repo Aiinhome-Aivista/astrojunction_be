@@ -15,6 +15,16 @@ from io import BytesIO
 from database.db_connection import call_procedure
 from services.report_service import generate_match_report_pdf
 from services.llm_extractor1 import get_ai_response
+from services.llm_service import _execute_llm
+
+def _verify_script(raw: str, target_lang: str) -> bool:
+    if target_lang == "hi":
+        return any('\u0900' <= c <= '\u097f' for c in raw)
+    elif target_lang == "bn":
+        return any('\u0980' <= c <= '\u09ff' for c in raw)
+    elif target_lang == "ta":
+        return any('\u0b80' <= c <= '\u0bff' for c in raw)
+    return True
 
 from services.report_service import generate_ai_synthesis_pdf
 # ============================================================
@@ -1036,8 +1046,21 @@ def calculate_ashta_koota(chart1: dict, chart2: dict) -> Tuple[List[dict], Dict[
 
 def _koota(kid, name, sanskrit, max_points, score, p1, p2, area, details=""):
     status = "good" if score >= max_points * 0.5 else "critical"
+    verdict = (
+        "Excellent" if score == max_points
+        else "Good" if score >= max_points * 0.5
+        else "Critical" if score == 0
+        else "Challenging"
+    )
+    verdict_id = (
+        "excellent" if score == max_points
+        else "good" if score >= max_points * 0.5
+        else "critical" if score == 0
+        else "challenging"
+    )
     return {
         "id": kid,
+        "koota_id": kid,
         "name": name,
         "sanskritName": sanskrit,
         "maxPoints": float(max_points),
@@ -1049,12 +1072,8 @@ def _koota(kid, name, sanskrit, max_points, score, p1, p2, area, details=""):
         "area": area,
         "details": details or ("Harmonious compatibility." if score == max_points else "Challenging disposition."),
         "status": status,
-        "verdict": (
-            "Excellent" if score == max_points
-            else "Good" if score >= max_points * 0.5
-            else "Critical" if score == 0
-            else "Challenging"
-        ),
+        "verdict": verdict,
+        "verdict_id": verdict_id,
     }
 
 
@@ -1986,6 +2005,8 @@ def calculate_match_endpoint():
         return _error(f"Failed to calculate Kundli Milan: {exc}", "CALCULATION_ERROR", 500)
 
 
+_MATCHMAKING_AI_CACHE = {}
+
 def build_deterministic_synthesis(
     partner1: dict,
     partner2: dict,
@@ -1994,13 +2015,10 @@ def build_deterministic_synthesis(
     max_score: float,
     partner1_manglik_status: str,
     partner2_manglik_status: str,
+    lang: str = "en",
 ) -> dict:
     p1_name = partner1.get("fullName") or partner1.get("name") or "Partner 1"
     p2_name = partner2.get("fullName") or partner2.get("name") or "Partner 2"
-    p1_rashi = partner1.get("rashi") or (partner1.get("moon") or {}).get("signName") or "Moon Rashi"
-    p2_rashi = partner2.get("rashi") or (partner2.get("moon") or {}).get("signName") or "Moon Rashi"
-    p1_nak = partner1.get("nakshatra") or (partner1.get("moon") or {}).get("nakshatra") or "Nakshatra"
-    p2_nak = partner2.get("nakshatra") or (partner2.get("moon") or {}).get("nakshatra") or "Nakshatra"
 
     def _get_k(key, alt_id=None):
         if isinstance(ashtaKoota, dict):
@@ -2020,6 +2038,17 @@ def build_deterministic_synthesis(
     bhakoot_k = _get_k("bhakoot")
     nadi_k = _get_k("nadi")
 
+    # Clean rashi names
+    p1_rashi_raw = partner1.get("rashi") or (partner1.get("moon") or {}).get("signName") or bhakoot_k.get("p1Value") or ""
+    p2_rashi_raw = partner2.get("rashi") or (partner2.get("moon") or {}).get("signName") or bhakoot_k.get("p2Value") or ""
+    p1_rashi = re.sub(r'\s*\([0-9]+\)', '', str(p1_rashi_raw)).replace(" Rashi", "").strip() or "Moon Sign"
+    p2_rashi = re.sub(r'\s*\([0-9]+\)', '', str(p2_rashi_raw)).replace(" Rashi", "").strip() or "Moon Sign"
+
+    p1_nak_raw = partner1.get("nakshatra") or (partner1.get("moon") or {}).get("nakshatra") or ""
+    p2_nak_raw = partner2.get("nakshatra") or (partner2.get("moon") or {}).get("nakshatra") or ""
+    p1_nak = re.sub(r'\s*\([0-9]+\)', '', str(p1_nak_raw)).replace(" Nakshatra", "").strip() or "Janma Nakshatra"
+    p2_nak = re.sub(r'\s*\([0-9]+\)', '', str(p2_nak_raw)).replace(" Nakshatra", "").strip() or "Janma Nakshatra"
+
     nadi_score = float(nadi_k.get("score") if nadi_k.get("score") is not None else (nadi_k.get("obtainedPoints") or 0))
     bhakoot_score = float(bhakoot_k.get("score") if bhakoot_k.get("score") is not None else (bhakoot_k.get("obtainedPoints") or 0))
     gana_score = float(gana_k.get("score") if gana_k.get("score") is not None else (gana_k.get("obtainedPoints") or 0))
@@ -2029,251 +2058,411 @@ def build_deterministic_synthesis(
     vashya_score = float(vashya_k.get("score") if vashya_k.get("score") is not None else (vashya_k.get("obtainedPoints") or 0))
     varna_score = float(varna_k.get("score") if varna_k.get("score") is not None else (varna_k.get("obtainedPoints") or 0))
 
-    nadi1 = nadi_k.get("p1Value") or nadi_k.get("partner1Nadi") or "Adi Nadi"
-    nadi2 = nadi_k.get("p2Value") or nadi_k.get("partner2Nadi") or "Madhya Nadi"
+    nadi1 = str(nadi_k.get("p1Value") or "Adi Nadi").replace(" Nadi", "").strip()
+    nadi2 = str(nadi_k.get("p2Value") or "Madhya Nadi").replace(" Nadi", "").strip()
     nadi_details = str(nadi_k.get("details") or nadi_k.get("reason") or nadi_k.get("note") or "")
     is_nadi_cancelled = nadi_k.get("cancellationApplied") or "Cancelled" in nadi_details or "Parihara" in nadi_details
 
-    yoni1 = yoni_k.get("p1Value") or yoni_k.get("yoni1") or "Ashwa"
-    yoni2 = yoni_k.get("p2Value") or yoni_k.get("yoni2") or "Gaja"
-    gana1 = gana_k.get("p1Value") or gana_k.get("gana1") or "Deva"
-    gana2 = gana_k.get("p2Value") or gana_k.get("gana2") or "Manushya"
-    bhakoot_rel = str(bhakoot_k.get("details") or bhakoot_k.get("relation") or bhakoot_k.get("note") or f"{p1_rashi} and {p2_rashi}")
+    yoni1 = str(yoni_k.get("p1Value") or "Ashwa").strip()
+    yoni2 = str(yoni_k.get("p2Value") or "Gaja").strip()
+    gana1 = str(gana_k.get("p1Value") or "Deva").replace(" Gana", "").strip()
+    gana2 = str(gana_k.get("p2Value") or "Manushya").replace(" Gana", "").strip()
 
     pct = (score / max_score * 100.0) if max_score > 0 else 0
-    if score >= 28:
-        verdict_term = "an Auspicious / Excellent"
-    elif score >= 24:
-        verdict_term = "a Highly Favorable / Very Good"
-    elif score >= 18:
-        verdict_term = "an Acceptable / Moderate"
+
+    p1_m_clean = "has Manglik" in str(partner1_manglik_status)
+    p2_m_clean = "has Manglik" in str(partner2_manglik_status)
+
+    # Localized digit helper
+    def _d(num_val):
+        s = f"{num_val:g}" if isinstance(num_val, (int, float)) else str(num_val)
+        if lang == 'hi':
+            deva = {'0':'०','1':'१','2':'२','3':'३','4':'४','5':'५','6':'६','7':'७','8':'८','9':'९'}
+            return ''.join(deva.get(c, c) for c in s)
+        if lang == 'bn':
+            beng = {'0':'০','1':'১','2':'২','3':'৩','4':'৪','5':'৫','6':'৬','7':'৭','8':'৮','9':'৯'}
+            return ''.join(beng.get(c, c) for c in s)
+        return s
+
+    if lang == "hi":
+        if score >= 28:
+            verdict_term = "उत्तम एवं अत्यंत शुभ"
+        elif score >= 24:
+            verdict_term = "मध्यम शुभ एवं अनुकूल"
+        elif score >= 18:
+            verdict_term = "सामान्य एवं मध्यम"
+        else:
+            verdict_term = "अल्प मिलान एवं संवेदनशील"
+
+        if not p1_m_clean and not p2_m_clean:
+            manglik_narrative = (
+                f"{p1_name} और {p2_name} दोनों में से किसी भी जातक की कुंडली में मांगलिक (कुज) दोष नहीं है। "
+                f"दोनों का दांपत्य संबंध निर्दोष ग्रहीय अक्ष पर संचालित होता है, जो वैवाहिक जीवन में शांति, आपसी विश्वास और अटूट प्रेम को सुनिश्चित करता है।"
+            )
+        elif p1_m_clean and p2_m_clean:
+            manglik_narrative = (
+                f"{p1_name} एवं {p2_name} दोनों की कुंडली में समान मांगलिक प्रभाव होने से शास्त्रीय परिहार के अनुसार दोष शांत हो जाता है। "
+                f"दोनों की ऊर्जा का यह संतुलन दांपत्य में दृढ़ता और परस्पर सहयोग को बढ़ावा देता है।"
+            )
+        else:
+            m_person = p1_name if p1_m_clean else p2_name
+            manglik_narrative = (
+                f"{m_person} की कुंडली में मांगलिक प्रभाव उपस्थित है, जिसके लिए संवाद में धैर्य आवश्यक है। "
+                f"मंगलवार को हनुमान चालीसा पाठ और शुभ वैदिक उपायों से मंगल का प्रभाव शांत होकर दांपत्य में सुख-शांति स्थापित होती है।"
+            )
+
+        overall = (
+            f"{p1_name} ({p1_rashi} राशि, {p1_nak} नक्षत्र) एवं {p2_name} ({p2_rashi} राशि, {p2_nak} नक्षत्र) के मध्य अष्टकूट मिलान में "
+            f"{_d(max_score)} में से {_d(score)} गुण प्राप्त होते हैं ({_d(int(pct))}%)। शास्त्रीय वैदिक ज्योतिष के अनुसार यह {verdict_term} मिलान है। "
+            f"यह संबंध मानसिक, स्वभाविक और आध्यात्मिक स्तर पर सकारात्मक सामंजस्य का संकेत देता है। आपसी समझ और वैदिक मार्गदर्शन से दांपत्य जीवन सुखी रहेगा।"
+        )
+
+        guna_milan = (
+            f"अष्टकूट में {_d(score)}/{_d(36)} गुण प्राप्त होना जीवन के प्रमुख स्तंभों में संतुलित संबंध को दर्शाता है। "
+            f"वर्ण कूट में {_d(varna_score)}/{_d(1)}, वश्य कूट में {_d(vashya_score)}/{_d(2)}, गण कूट में {_d(gana_score)}/{_d(6)} एवं योनि कूट में {_d(yoni_score)}/{_d(4)} अंक प्राप्त होते हैं।"
+        )
+
+        psychological = (
+            f"ग्रह मैत्री कूट ({_d(graha_score)}/{_d(5)} अंक) मानसिक और बौद्धिक सामंजस्य को पुष्ट करता है। "
+            f"दोनों जातक महत्वपूर्ण पारिवारिक और जीवनगत निर्णयों में एक-दूसरे के दृष्टिकोण का सम्मान करते हुए रचनात्मक संवाद बनाए रखने में सक्षम हैं।"
+        )
+
+        emotional = (
+            f"भकूट संबंध में {_d(bhakoot_score)}/{_d(7)} अंक प्राप्त होते हैं। चंद्र राशियों का यह संयोजन पारिवारिक सुख और भावनात्मक आत्मीयता को संवर्धित करता है। "
+            f"आपसी स्नेह और देखभाल संबंध को समय के साथ और अधिक प्रगाढ़ बनाते हैं।"
+        )
+
+        karmic_bond = (
+            f"तारा कूट {_d(tara_score)}/{_d(3)} अंक के साथ दीर्घायु और साझा भाग्य का समर्थन करता है। "
+            f"ग्रहों की यह अनुकूलता दोनों जातकों को सांसारिक और आध्यात्मिक उन्नति की दिशा में परस्पर सहयोग प्रदान करती है।"
+        )
+
+        physical_harm = (
+            f"योनि कूट में {_d(yoni_score)}/{_d(4)} अंक प्राप्त होते हैं ({yoni1} एवं {yoni2} योनि)। "
+            f"सहज आकर्षण और पारस्परिक सम्मान दांपत्य जीवन में सुखद एवं सौहार्दपूर्ण जैविक संतुलन स्थापित करते हैं।"
+        )
+
+        if nadi_score == 8 or is_nadi_cancelled:
+            nadi_analysis = (
+                f"नाड़ी जीवंतता अत्यंत सशक्त है ({_d(nadi_score)}/{_d(8)} अंक)। "
+                f"प्राणिक ऊर्जा और आनुवंशिक स्वास्थ्य का यह सामंजस्य उत्तम संतान सुख और दीर्घायु को आशीर्वाद प्रदान करता है।"
+            )
+        else:
+            nadi_analysis = (
+                f"नाड़ी कूट में {_d(nadi_score)}/{_d(8)} अंक प्राप्त होते हैं ({nadi1} एवं {nadi2} नाड़ी)। "
+                f"स्वास्थ्य और प्राणिक संतुलन हेतु प्रतिदिन महामृत्युंजय जप और शुभ नक्षत्र में वैदिक दान करना श्रेयस्कर है।"
+            )
+
+        bhakoot_analysis = (
+            f"{p1_rashi} एवं {p2_rashi} राशियों के मध्य भकूट में {_d(bhakoot_score)}/{_d(7)} अंक प्राप्त होते हैं। "
+            f"यह स्थिति गृहस्थ जीवन में समृद्धि, आर्थिक स्थिरता और परस्पर सौहार्द को बढ़ावा देती है।"
+        )
+
+        family_life = (
+            f"गण ({gana1} एवं {gana2}) तथा भकूट की शुभ स्थिति से पारिवारिक जीवन सुखद और सम्मानित रहेगा। "
+            f"दोनों जातक संयुक्त पारिवारिक मूल्यों और संस्कारों का आदर करते हुए गृहस्थी में खुशहाली लाएंगे।"
+        )
+
+        wealth_prosp = (
+            f"ग्रहीय स्थिति निरंतर आर्थिक समृद्धि और भौतिक उन्नति की ओर संकेत करती है। "
+            f"संयुक्त भाग्य से आर्थिक निर्णय विवेकपूर्ण रहेंगे और दीर्घकालिक सुरक्षा प्राप्त होगी।"
+        )
+
+        strengths = [
+            f"पारस्परिक संवाद एवं बौद्धिक तालमेल ({_d(graha_score)}/{_d(5)} ग्रह मैत्री)।",
+            f"गृहस्थ एवं पारिवारिक समृद्धि का मजबूत आधार ({_d(bhakoot_score)}/{_d(7)} भकूट)।",
+            f"एक-दूसरे के करियर और महत्वाकांक्षाओं का सम्मान ({_d(varna_score)}/{_d(1)} वर्ण)।",
+            "संयम और परिपक्व समझ से समस्याओं का सहज समाधान।"
+        ]
+
+        challenges = [
+            "व्यस्तता अथवा तनाव के समय तात्कालिक भावनात्मक अभिव्यक्ति में अंतर।",
+            "व्यक्तिगत स्वतंत्रता और पारिवारिक जिम्मेदारियों के मध्य संतुलन बनाए रखना।"
+        ]
+
+        conflict_res = [
+            "प्रतिदिन शांत वातावरण में एक-दूसरे से खुलकर और बिना पूर्वाग्रह के संवाद करें।",
+            "तनाव के समय एक-दूसरे की मानसिक स्थिति को समझें और आवश्यक व्यक्तिगत स्थान दें।",
+            "पारस्परिक सौहार्द बढ़ाने हेतु संयुक्त तीर्थयात्रा अथवा धार्मिक गतिविधियों में भाग लें।"
+        ]
+
+        vedic_remedies = [
+            "दांपत्य माधुर्य हेतु प्रत्येक शुक्रवार को 'ॐ शुं शुक्राय नमः' का २१ बार जप करें।",
+            "पारिवारिक सुख-शांति हेतु गुरुवार की शाम को पूर्व दिशा की ओर शुद्ध गाय के घी का दीपक जलाएं।",
+            "ईश्वरीय कृपा प्राप्ति हेतु शुभ तिथियों पर जरूरतमंदों को अन्न, वस्त्र अथवा आवश्यक वस्तुओं का दान करें।",
+            "दीर्घायु और अखंड सौभाग्य हेतु शुक्ल पक्ष के सोमवार को भगवान शिव और माता पार्वती की संयुक्त आराधना करें।"
+        ]
+
+        final_assessment = (
+            f"निष्कर्षतः, {p1_name} एवं {p2_name} का यह संबंध {verdict_term} दांपत्य आधार प्रस्तुत करता है। "
+            f"आपसी विश्वास, आदर और वैदिक उपायों के नियमित अनुपालन से यह विवाह सुख, शांति और समृद्धि से परिपूर्ण रहेगा।"
+        )
+
+    elif lang == "bn":
+        if score >= 28:
+            verdict_term = "উত্তম ও অত্যন্ত শুভ"
+        elif score >= 24:
+            verdict_term = "মধ্যম শুভ ও সন্তোষজনক"
+        elif score >= 18:
+            verdict_term = "সাধারণ ও সহনশীল"
+        else:
+            verdict_term = "অল্প মিলন ও সতর্কতামূলক"
+
+        if not p1_m_clean and not p2_m_clean:
+            manglik_narrative = (
+                f"{p1_name} ও {p2_name} উভয়ের কোষ্ঠীতে কোনো মাঙ্গলিক (কুজ) দোষ নেই। "
+                f"উভয়ের রাশিচক্রের এই নির্দোষ অক্ষ দাম্পত্য জীবনে চিরস্থায়ী শান্তি, পারস্পরিক আস্থা ও প্রীতি নিশ্চিত করে।"
+            )
+        elif p1_m_clean and p2_m_clean:
+            manglik_narrative = (
+                f"{p1_name} এবং {p2_name} উভয়েরই সমান মাঙ্গলিক প্রভাব থাকায় শাস্ত্রীয় পরিহার অনুসারে দোষ নিষ্ক্রিয় হয়েছে। "
+                f"এই সমতা দাম্পত্যের বন্ধনকে আরও সুদৃঢ় ও গতিশীল করে।"
+            )
+        else:
+            m_person = p1_name if p1_m_clean else p2_name
+            manglik_narrative = (
+                f"{m_person}-এর কোষ্ঠীতে মাঙ্গলিক প্রভাব থাকায় সম্পর্কের ক্ষেত্রে সংযম ও ধৈর্য প্রয়োজন। "
+                f"নিয়মিত হনুমান চালিসা পাঠ এবং মঙ্গলবার শাস্ত্রীয় দানকার্য মঙ্গল দোষের তীব্রতা প্রশমিত করে।"
+            )
+
+        overall = (
+            f"{p1_name} ({p1_rashi} রাশি, {p1_nak} নক্ষত্র) এবং {p2_name} ({p2_rashi} রাশি, {p2_nak} নক্ষত্র)-এর অষ্টকূট বিচারে "
+            f"{_d(max_score)}-এর মধ্যে {_d(score)} গুণ অর্জিত হয়েছে ({_d(int(pct))}%)। সনাতন বৈদিক জ্যোতিষ অনুসারে এটি একটি {verdict_term} মিলন। "
+            f"এই সম্পর্ক মানসিক, সামাজিক ও নৈতিক ক্ষেত্রে ইতিবাচক সংগতি প্রদান করে। পারস্পরিক শ্রদ্ধাবোধ দাম্পত্যকে দীর্ঘস্থায়ী করবে।"
+        )
+
+        guna_milan = (
+            f"অষ্টকূটে {_d(score)}/{_d(36)} গুণ প্রাপ্তি জীবনের মূল ক্ষেত্রগুলোতে ভারসাম্যপূর্ণ সংগতি নির্দেশ করে। "
+            f"বর্ণ কূটে {_d(varna_score)}/{_d(1)}, বশ্য কূটে {_d(vashya_score)}/{_d(2)}, গণ কূটে {_d(gana_score)}/{_d(6)} এবং যোনি কূটে {_d(yoni_score)}/{_d(4)} প্রাপ্ত হয়েছে।"
+        )
+
+        psychological = (
+            f"গ্রহ মৈত্রী কূটে প্রাপ্ত {_d(graha_score)}/{_d(5)} পয়েন্ট গভীর মানসিক বোঝাপড়াকে নির্দেশ করে। "
+            f"উভয় অংশীদারই জীবন ও পরিবারের বিষয়ে সহমর্মিতার সাথে আলোচনা করে সঠিক সিদ্ধান্তে পৌঁছাতে সক্ষম হবেন।"
+        )
+
+        emotional = (
+            f"ভকূট সমন্বয়ে {_d(bhakoot_score)}/{_d(7)} পয়েন্ট অর্জিত হয়েছে। উভয়ের চন্দ্র রাশির শুভ অবস্থান পারস্পরিক আবেগঘন টান এবং সৌহার্দ্য বৃদ্ধি করে।"
+        )
+
+        karmic_bond = (
+            f"তারা কূটে {_d(tara_score)}/{_d(3)} পয়েন্ট দীর্ঘায়ু ও ভাগ্যের সহায়তার পরিচায়ক। "
+            f"গ্রহদের এই সংযোগ বৈষয়িক ও আধ্যাত্মিক উন্নতির পথে সহায়তা করবে।"
+        )
+
+        physical_harm = (
+            f"যোনি কূটে {_d(yoni_score)}/{_d(4)} পয়েন্ট ({yoni1} ও {yoni2} যোনি) স্বাভাবিক আকর্ষণ এবং সন্তোষজনক দাম্পত্য জীবনের নির্দেশক।"
+        )
+
+        if nadi_score == 8 or is_nadi_cancelled:
+            nadi_analysis = (
+                f"নাড়ী কূট অত্যন্ত শুভ ({_d(nadi_score)}/{_d(8)} পয়েন্ট)। উভয়ের ভিন্ন নাড়ী সুস্বাস্থ্য ও সুস্থ সন্তানসুখ নিশ্চিত করে।"
+            )
+        else:
+            nadi_analysis = (
+                f"নাড়ী কূটে {_d(nadi_score)}/{_d(8)} পয়েন্ট ({nadi1} ও {nadi2} নাড়ী)। শারীরিক ও প্রাণিক ভারসাম্যের জন্য মহামৃত্যুঞ্জয় জপ ও দান আবশ্যক।"
+            )
+
+        bhakoot_analysis = (
+            f"{p1_rashi} এবং {p2_rashi} রাশির মধ্যে ভকূটে {_d(bhakoot_score)}/{_d(7)} পয়েন্ট রয়েছে, যা পারিবারিক সমৃদ্ধি ও ঐক্যের সংকেত দেয়।"
+        )
+
+        family_life = (
+            f"গণ ও ভকূটের অনুকূল অবস্থানে পারিবারিক জীবন শান্তিপূর্ণ ও আনন্দময় হবে। উভয় পরিবারেই সৌহার্দ্য বজায় থাকবে।"
+        )
+
+        wealth_prosp = (
+            f"উভয়ের সম্মিলিত গ্রহস্থিতি আর্থিক প্রবৃদ্ধি ও সম্পদের ধারাবাহিক বিকাশের সহায়ক হবে।"
+        )
+
+        strengths = [
+            f"চমৎকার মানসিক মেলবন্ধন ও শ্রদ্ধাবোধ ({_d(graha_score)}/{_d(5)} গ্রহ মৈত্রী)।",
+            f"পারিবারিক সমৃদ্ধি ও দাম্পত্য স্থায়িত্ব ({_d(bhakoot_score)}/{_d(7)} ভকূট)।",
+            f"পরস্পরের কর্মজীবনের প্রতি আন্তরিক সম্মান ({_d(varna_score)}/{_d(1)} বর্ণ)।",
+            "ধৈর্য ও সহানুভূতির সাথে পারিবারিক সমস্যার সমাধান।"
+        ]
+
+        challenges = [
+            "কাজের চাপ বা ক্লান্তির মুহূর্তে পারস্পরিক আবেগ প্রকাশের ভিন্নতা।",
+            "ব্যক্তিগত পছন্দ এবং পারিবারিক দায়িত্বের মাঝে ভারসাম্য রক্ষা করা।"
+        ]
+
+        conflict_res = [
+            "প্রতিদিন কিছুটা সময় খোলামনে ও শান্তভাবে পরস্পরের সাথে কথা বলুন।",
+            "মানসিক চাপের সময় একে অপরকে প্রয়োজনীয় ব্যক্তিগত সময় ও সুযোগ দিন।",
+            "পারস্পরিক সৌহার্দ্য বৃদ্ধির জন্য যৌথভাবে ধর্মীয় তীর্থস্থান ভ্রমণ করুন।"
+        ]
+
+        vedic_remedies = [
+            "দাম্পত্য মধুরতার জন্য প্রতি শুক্রবার 'ॐ शुं शुक्राय नमः' ২১ বার জপ করুন।",
+            "পারিবারিক শান্তির জন্য বৃহস্পতিবার সন্ধ্যায় পূর্বমুখী হয়ে খাঁটি ঘিয়ের প্রদীপ জ্বালান।",
+            "শুভ তিথিতে বস্ত্র বা খাদ্যসামগ্রী দরিদ্রদের দান করুন।",
+            "দীর্ঘায়ু ও সমৃদ্ধির জন্য শুক্লপক্ষের সোমবারে শিব ও পার্বতীর যৌথ পূজা করুন।"
+        ]
+
+        final_assessment = (
+            f"সারসংক্ষেপে, {p1_name} ও {p2_name}-এর এই সম্পর্ক একটি {verdict_term} বৈবাহিক ভিত্তি প্রদান করে। "
+            f"পারস্পরিক শ্রদ্ধা ও বৈদিক প্রতিকার পালনের মাধ্যমে এই দাম্পত্য জীবন সুখ ও শান্তিতে ভরে উঠবে।"
+        )
+
     else:
-        verdict_term = "a Delicately Balanced / Challenging"
+        # Default English
+        if score >= 28:
+            verdict_term = "an Auspicious / Excellent"
+        elif score >= 24:
+            verdict_term = "a Highly Favorable / Very Good"
+        elif score >= 18:
+            verdict_term = "an Acceptable / Moderate"
+        else:
+            verdict_term = "a Delicately Balanced / Challenging"
 
-    # Overall compatibility narrative
-    overall = (
-        f"The marital compatibility evaluation between {p1_name} ({p1_rashi} Rashi, {p1_nak} Nakshatra) and "
-        f"{p2_name} ({p2_rashi} Rashi, {p2_nak} Nakshatra) registers an Ashta Koota total of {score:g} out of {max_score:g} "
-        f"points ({pct:.1f}%). Classical Vedic Jyotish categorizes this score as {verdict_term} match, indicating "
-        f"a meaningful alignment of core psychological, energetic, and temperamental archetypes. "
-        f"While the fundamental cosmic harmony is supportive, conscious cultivation of mutual patience and communication "
-        f"will ensure stability and long-term domestic tranquility."
-    )
+        if not p1_m_clean and not p2_m_clean:
+            manglik_narrative = (
+                f"Neither {p1_name} nor {p2_name} carries Kuja (Manglik) Dosha. "
+                f"Their marital union operates on an unblemished planetary axis, fostering enduring peace, "
+                f"mutual trust, and harmonious domestic tranquility without martial friction."
+            )
+        elif p1_m_clean and p2_m_clean:
+            manglik_narrative = (
+                f"Both {p1_name} and {p2_name} possess matching Kuja Dosha, resulting in classical mutual "
+                f"cancellation (Parihara). The dynamic fire energies balance reciprocally, stimulating "
+                f"constructive ambition and marital resilience."
+            )
+        else:
+            m_person = p1_name if p1_m_clean else p2_name
+            manglik_narrative = (
+                f"{m_person} carries active Kuja Dosha, requiring conscious patience in communication. "
+                f"Classical pacification through Tuesday Hanuman Chalisa recitation and charitable upayas "
+                f"effectively stabilizes martial heat and protects relationship harmony."
+            )
 
-    # Guna Milan narrative
-    top_strengths = []
-    if nadi_score >= 6: top_strengths.append("Nadi (physiological & genetic vitality)")
-    if bhakoot_score >= 5: top_strengths.append("Bhakoot (emotional & familial welfare)")
-    if gana_score >= 5: top_strengths.append("Gana (temperamental concord)")
-    if graha_score >= 4: top_strengths.append("Graha Maitri (intellectual friendship)")
-    if yoni_score >= 3: top_strengths.append("Yoni (instinctual compatibility)")
-    strengths_str = ", ".join(top_strengths) if top_strengths else "Varna and Vashya foundation"
-
-    guna = (
-        f"In the canonical 36-Guna Milan framework, the alliance earns {score:g} points, reflecting significant "
-        f"resonance across primary relationship dimensions. Strongest point contributions are observed in {strengths_str}, "
-        f"which provide an enduring bedrock for marital understanding. Areas where points are constrained highlight points "
-        f"of individual differentiation rather than insurmountable barriers. By consciously honoring each other's inherent "
-        f"planetary tendencies, the couple can navigate any Guna discrepancies with ease."
-    )
-
-    # Psychological affinity narrative
-    psycho = (
-        f"Psychological and intellectual affinity is governed by Graha Maitri (planetary friendship) between the Rashi lords, "
-        f"scoring {graha_score:g}/5 points. {p1_name}'s mental disposition is steered by {p1_rashi}, while {p2_name}'s cognitive "
-        f"approach is shaped by {p2_rashi}. Their interaction reveals "
-        f"{'warm mutual understanding and shared intellectual wavelengths' if graha_score >= 3 else 'divergent thinking styles that require active, open discussion rather than assumptions'}. "
-        f"Practicing open communication without defensiveness will allow both partners to convert philosophical differences into mutual enrichment."
-    )
-
-    # Emotional resonance narrative
-    emotional = (
-        f"The emotional resonance between {p1_name} and {p2_name} is anchored in their Moon nakshatras, {p1_nak} and {p2_nak}. "
-        f"The Moon governs the subconscious feeling nature, receptive capacity, and instinctual empathy. "
-        f"Their mutual alignment allows intuitive understanding of each other's emotional moods and vulnerabilities when patience is exercised. "
-        f"Creating regular quiet interludes away from daily routines will allow their emotional intimacy to blossom securely over time."
-    )
-
-    # Karmic bond narrative
-    karmic = (
-        f"From the perspective of Vedic karmic synastry, Tara Koota ({tara_score:g}/3 points) indicates an authentic past-life "
-        f"connection and shared destiny intended for personal evolution. Both souls bring complementary karmic debts (Rinanubandha) "
-        f"and lessons that balance one another's life paths. Engaging in joint spiritual disciplines, temple visits, and charitable "
-        f"service together will help sublimate latent karmic tensions into spiritual progress and domestic joy."
-    )
-
-    # Physical harmonization narrative
-    physical = (
-        f"Physical and instinctual harmonization, governed by Yoni Koota ({yoni_score:g}/4 points with {yoni1} and {yoni2} types), "
-        f"reflects the couple's subconscious attraction and biological rhythm. "
-        f"{'Their animal archetypes share a natural attraction that supports deep intimate warmth and physical affection.' if yoni_score >= 3 else 'Their distinct biological archetypes benefit from mutual gentleness, considerate pacing, and emotional reassurance.'} "
-        f"Cultivating a calm, restful bedroom sanctuary and honoring individual personal space will sustain lasting romance and mutual vitality."
-    )
-
-    # Manglik dosha narrative
-    p1_m = "has Manglik Dosha" in str(partner1_manglik_status)
-    p2_m = "has Manglik Dosha" in str(partner2_manglik_status)
-    if p1_m and p2_m:
-        manglik_narrative = (
-            f"Kuja Dosha evaluation reveals that both {p1_name} and {p2_name} carry active Manglik influences. "
-            f"According to classical Jyotish maxims, mutual Manglik presence provides an authentic cancellation (Dosha Samyam), "
-            f"neutralizing harsh malefic effects through reciprocal high energy and assertive drive. "
-            f"The couple should channel their dynamic vitality constructively into shared physical activities and creative ambitions."
-        )
-    elif p1_m or p2_m:
-        m_who = p1_name if p1_m else p2_name
-        non_who = p2_name if p1_m else p1_name
-        manglik_narrative = (
-            f"Kuja Dosha analysis indicates that {m_who} carries an active Manglik placement, while {non_who} has a Non-Manglik status. "
-            f"The focused intensity of Mars can manifest as sudden impatience or sharp verbal reactions during high-stress situations. "
-            f"Observing Tuesday Hanuman Chalisa recitation, donating red lentils (masoor dal), and practicing conscious conflict cooling "
-            f"will preserve harmony and balance marital energies effectively."
-        )
-    else:
-        manglik_narrative = (
-            f"Evaluation confirms that neither {p1_name} nor {p2_name} carries an active Manglik Dosha in their foundational charts. "
-            f"Mars is situated in benign, non-afflicting houses, shielding the marital seventh and eighth cusps from destructive friction. "
-            f"This clean Manglik disposition provides a serene and balanced astrological foundation for peaceful matrimonial life."
+        overall = (
+            f"The marital compatibility evaluation between {p1_name} ({p1_rashi} Rashi, {p1_nak} Nakshatra) and "
+            f"{p2_name} ({p2_rashi} Rashi, {p2_nak} Nakshatra) registers an Ashta Koota total of {score:g} out of {max_score:g} "
+            f"points ({pct:.1f}%). Classical Vedic Jyotish categorizes this score as {verdict_term} match, indicating "
+            f"a meaningful alignment of core psychological, energetic, and temperamental archetypes. "
+            f"While the fundamental cosmic harmony is supportive, conscious cultivation of mutual patience and communication "
+            f"will ensure stability and long-term domestic tranquility."
         )
 
-    # Nadi analysis narrative
-    if nadi_score == 0:
-        nadi_narrative = (
-            f"Nadi Koota registers an active Nadi Dosha with 0/8 points as both partners share {nadi1} ({p1_nak} and {p2_nak}). "
-            f"In classical Vedic physiology, identical Nadi signifies an identical elemental humor (Tridosha: Vata, Pitta, or Kapha), "
-            f"which traditionally calls for mindfulness regarding reproductive wellness, progeny, and physiological stamina. "
-            f"The couple should perform dedicated Maha Mrityunjaya Japa (108 daily), practice Swarna-Daan or grain donation, "
-            f"and maintain regular medical checkups to smoothly mitigate these bio-energetic imbalances."
-        )
-    elif is_nadi_cancelled:
-        nadi_narrative = (
-            f"While both partners share {nadi1}, canonical Vedic cancellation (Parihara) applies due to different Nakshatras or distinct Rashi lords, "
-            f"awarding the full 8/8 points. Classical Jyotish texts confirm that this parihara dissolves the primary bio-energetic and genetic afflictions, "
-            f"ensuring sound physiological compatibility and auspicious progeny. "
-            f"Routine worship of Lord Shiva with white flowers and bilva leaves on Mondays will sustain excellent physical well-being."
-        )
-    else:
-        nadi_narrative = (
-            f"Nadi Koota achieves a perfect 8 out of 8 points, with {p1_name} having {nadi1} and {p2_name} having {nadi2}. "
-            f"Under classical Ayurvedic and Jyotish principles, complementary Nadis generate optimal bio-energetic balance, genetic vitality, "
-            f"and sound reproductive wellness. This stands as one of the most auspicious and reassuring pillars of this marital union."
+        guna_milan = (
+            f"The Ashta Koota score of {score:g}/36 highlights balanced cosmic harmony across essential dimensions. "
+            f"Spiritual varna compatibility stands at {varna_score:g}/1, mutual attraction at {vashya_score:g}/2, "
+            f"temperamental gana accord at {gana_score:g}/6, and biological yoni resonance at {yoni_score:g}/4."
         )
 
-    # Bhakoot analysis narrative
-    if bhakoot_score == 0:
-        bhakoot_narrative = (
-            f"Bhakoot Koota receives 0/7 points due to a mutual disposition ({bhakoot_rel}) between Moon signs {p1_rashi} and {p2_rashi}. "
-            f"This planetary stance can periodically test financial coordination, emotional expectations, or familial obligations. "
-            f"Classical Vedic tradition prescribes reciting the Vishnu Sahasranama, performing Navagraha Shanti, and maintaining transparent "
-            f"financial conversations to dissolve energetic friction and cultivate abundance."
-        )
-    else:
-        bhakoot_narrative = (
-            f"Bhakoot Koota awards a full 7 out of 7 points, reflecting an auspicious planetary relationship ({bhakoot_rel}) between "
-            f"{p1_rashi} and {p2_rashi}. This harmonious flow fosters mutual emotional generosity, long-term financial security, and blissful "
-            f"domestic growth. Both partners will naturally support each other's career goals and share joint pride in their home life."
+        psychological = (
+            f"Mental rapport is guided by Graha Maitri ({graha_score:g}/5 points). "
+            f"Both individuals share an innate ability to communicate life goals, ensuring constructive dialogue "
+            f"and mutual intellectual respect during key family decisions."
         )
 
-    # Family & married life narrative
-    family_life = (
-        f"Family integration and the long-term prospects of married life are favorably supported by the foundational Gunas, "
-        f"including Varna ({varna_score:g}/1) and Vashya ({vashya_score:g}/2). Both individuals show sincere respect for family duties, "
-        f"traditions, and domestic comfort. Cultivating active rapport with extended in-laws and celebrating auspicious occasions jointly "
-        f"will reinforce a warm, unified, and enduring family structure."
-    )
+        emotional = (
+            f"Bhakoot harmony scores {bhakoot_score:g}/7 points. Their Moon signs foster emotional warmth and family welfare. "
+            f"Mutual affection and genuine care provide a resilient emotional foundation that deepens with shared milestones."
+        )
 
-    # Wealth & prosperity narrative
-    wealth = (
-        f"Wealth generation and material prosperity demonstrate steady, cumulative promise under their combined planetary signatures. "
-        f"Their joint energetic alignment encourages prudent fiscal discipline, thoughtful investments, and long-term asset building. "
-        f"Practicing regular joint charity on Thursdays or Fridays will invite the divine grace of Goddess Lakshmi and Lord Brihaspati, "
-        f"amplifying both material security and spiritual contentment."
-    )
+        karmic_bond = (
+            f"Tara Koota contributes {tara_score:g}/3 points towards shared destiny and longevity. "
+            f"Their astrological alignment reflects a meaningful partnership intended to elevate both partners spiritually and socially."
+        )
 
-    # Major strengths (list of strings)
-    strengths = [
-        f"Strong core Ashta Koota total ({score:g}/{max_score:g} points), satisfying classical criteria for marital consideration.",
-        f"Excellent Nadi compatibility ({nadi1} & {nadi2}), ensuring sound bio-energetic vitality and reproductive wellness." if nadi_score >= 8 else (
-            f"Authentic Nadi Parihara (Cancellation) mitigating traditional genetic concerns and preserving vitality." if is_nadi_cancelled else
-            f"Complementary personality strengths rooted in {p1_nak} and {p2_nak} Nakshatra placements."
-        ),
-        f"Auspicious Bhakoot flow ({bhakoot_score:g}/7 points) ensuring domestic cheerfulness and emotional generosity." if bhakoot_score >= 5 else (
-            f"Shared dedication to domestic security and household integrity despite astrological variations."
-        ),
-        f"Deep psychological and soul-level connection fostering long-term spiritual growth and companionship."
-    ]
+        physical_harm = (
+            f"Yoni Koota scores {yoni_score:g}/4 points ({yoni1} and {yoni2} archetypes). "
+            f"Instinctual comfort and mutual respect facilitate a harmonious, fulfilling physical and emotional bond."
+        )
 
-    # Major challenges (list of strings)
-    challenges = []
-    if nadi_score == 0:
-        challenges.append(f"Active Nadi Dosha ({nadi1} shared by both partners), requiring traditional remedial vigilance and health care.")
-    if bhakoot_score == 0:
-        challenges.append(f"Bhakoot discord ({bhakoot_rel}), requiring clear communication around finances and emotional expectations.")
-    if gana_score == 0:
-        challenges.append(f"Gana divergence ({gana1} vs {gana2}), which may trigger occasional misunderstandings during disagreements.")
-    if (p1_m or p2_m) and not (p1_m and p2_m):
-        challenges.append(f"Kuja (Manglik) intensity in one partner, requiring conscious anger management and cooling practices.")
-    if not challenges:
-        challenges.append("Minor differences in daily routines and communication styles that require ongoing mutual adaptation.")
-        challenges.append("Balancing individual career ambitions with collective domestic responsibilities.")
+        if nadi_score == 8 or is_nadi_cancelled:
+            nadi_analysis = (
+                f"Nadi vitality is strong ({nadi_score:g}/8 points). Genetic resonance and physiological bio-energies "
+                f"harmonize naturally, supporting long-term health, vitality, and healthy progeny."
+            )
+        else:
+            nadi_analysis = (
+                f"Nadi Koota scores {nadi_score:g}/8 points ({nadi1} & {nadi2} Nadis). "
+                f"To fortify physiological equilibrium, performing Maha Mrityunjaya Japa and remedial donations "
+                f"is traditionally recommended for marital peace and progeny vitality."
+            )
 
-    # Conflict resolution (list of strings)
-    conflict = [
-        "Adopt a 24-hour cooling-off rule before addressing sensitive or emotionally charged relationship topics.",
-        "Practice active listening without interrupting, validating each other's feelings before proposing practical solutions.",
-        "Establish unified financial guidelines and maintain transparent communication regarding significant family expenditures.",
-        "Celebrate weekly shared spiritual moments or peaceful nature walks to recalibrate relationship tranquility."
-    ]
+        bhakoot_analysis = (
+            f"Bhakoot Koota awards {bhakoot_score:g}/7 points between {p1_rashi} and {p2_rashi} Rashis. "
+            f"This disposition strengthens household prosperity, financial stability, and mutual emotional bonding."
+        )
 
-    def _find_sign_lord(sign_name):
-        for z in ZODIAC_SIGNS:
-            if z["name"].lower() == str(sign_name).lower() or z["sanskrit"].lower() == str(sign_name).lower():
-                return z["lord"]
-        return "Moon"
+        family_life = (
+            f"Family and married life are well-supported by harmonious Gana ({gana1} & {gana2}) and Bhakoot configurations. "
+            f"Both partners share core cultural values, ensuring warm inter-family relations and joyful domestic life."
+        )
 
-    p1_lord = _find_sign_lord(p1_rashi)
-    p2_lord = _find_sign_lord(p2_rashi)
+        wealth_prosp = (
+            f"Planetary synergy indicates steady financial growth and prosperity. "
+            f"Their collective fortunes foster judicious investments, comfortable living, and long-term security."
+        )
 
-    # Vedic remedies (list of strings)
-    vedic_rems = generate_match_remedies(
-        partner1, partner2,
-        {"signName": p1_rashi, "nakshatra": p1_nak, "signLord": p1_lord},
-        {"signName": p2_rashi, "nakshatra": p2_nak, "signLord": p2_lord},
-        ashtaKoota if isinstance(ashtaKoota, dict) else {},
-        {"status": {"partner1": partner1_manglik_status, "partner2": partner2_manglik_status}}
-    )
+        strengths = [
+            f"Harmonious communication and shared intellectual values ({graha_score:g}/5 Graha Maitri).",
+            f"Solid foundation for household growth and long-term companionship ({bhakoot_score:g}/7 Bhakoot).",
+            f"Mutual respect for individual careers and vocational aspirations ({varna_score:g}/1 Varna).",
+            "Constructive problem-solving through mature emotional patience."
+        ]
 
-    # Final assessment narrative
-    final = (
-        f"In summary, the astrological union between {p1_name} and {p2_name} presents a {verdict_term} compatibility profile "
-        f"backed by a solid score of {score:g}/36 Gunas. The natural strengths of this match provide a resilient base for a loving, "
-        f"fulfilling, and prosperous married life. By observing the recommended Vedic upayas, maintaining mutual respect, and "
-        f"approaching life's challenges with unified teamwork, this couple can build a deeply happy and enduring bond."
-    )
+        challenges = [
+            "Differences in immediate emotional expression under high workload or stress.",
+            "Balancing personal independence with shared familial commitments."
+        ]
+
+        conflict_res = [
+            "Establish daily quiet reflection and open, non-judgmental communication.",
+            "Acknowledge each other's emotional rhythms and grant space during demanding periods.",
+            "Plan joint leisure activities and spiritual visits to nourish mutual bonding."
+        ]
+
+        vedic_remedies = [
+            f"Recite 'Om Shum Shukraya Namaha' 21 times every Friday to invoke lasting romantic sweetness.",
+            f"Jointly light a pure cow ghee lamp facing East on Thursday evenings for family tranquility.",
+            f"Perform charity of food or clothing to the needy on auspicious tithis to invoke divine grace.",
+            f"Worship Lord Shiva and Goddess Parvati together on Shukla Paksha Mondays for relationship longevity."
+        ]
+
+        final_assessment = (
+            f"In summary, the union of {p1_name} and {p2_name} presents {verdict_term.lower()} marital foundation. "
+            f"Grounded in mutual reverence, mindful communication, and sacred Vedic remedies, this relationship "
+            f"promises profound happiness, domestic harmony, and enduring prosperity."
+        )
 
     return {
         "overall_compatibility": overall,
-        "guna_milan": guna,
-        "psychological_affinity": psycho,
+        "guna_milan": guna_milan,
+        "psychological_affinity": psychological,
         "emotional_resonance": emotional,
-        "karmic_bond": karmic,
-        "physical_harmonization": physical,
+        "karmic_bond": karmic_bond,
+        "physical_harmonization": physical_harm,
         "manglik_dosha": manglik_narrative,
-        "nadi_analysis": nadi_narrative,
-        "bhakoot_analysis": bhakoot_narrative,
+        "nadi_analysis": nadi_analysis,
+        "bhakoot_analysis": bhakoot_analysis,
         "family_and_married_life": family_life,
-        "wealth_and_prosperity": wealth,
+        "wealth_and_prosperity": wealth_prosp,
         "major_strengths": strengths,
         "major_challenges": challenges,
-        "conflict_resolution": conflict,
-        "vedic_remedies": vedic_rems,
-        "final_assessment": final,
+        "conflict_resolution": conflict_res,
+        "vedic_remedies": vedic_remedies,
+        "final_assessment": final_assessment,
+        "language": lang,
     }
 
 
 def generate_ai_synthesis(user_id: str):
+    import time
+    start_time = time.time()
     try:
         body = request.get_json(silent=True) or {}
+
+        # Validate language parameter
+        lang = str(body.get("language") or body.get("lang") or "en").lower().strip()
+        if lang not in {"en", "hi", "bn", "ta", "fr"}:
+            lang = "en"
+
+        force_refresh = bool(body.get("force") or body.get("forceRefresh"))
 
         if "matchResult" in body:
             report = body.get("matchResult", {})
@@ -2290,9 +2479,7 @@ def generate_ai_synthesis(user_id: str):
             if not isinstance(report, dict):
                 return _error("report must be a JSON object", "INVALID_REPORT", 400)
 
-            report_id = data.get("id")
-            if not report_id:
-                return _error("id is required", "ID_REQUIRED", 400)
+            report_id = data.get("id") or "unsaved"
 
         partner1 = report.get("partner1") or body.get("partner1") or {}
         partner2 = report.get("partner2") or body.get("partner2") or {}
@@ -2327,16 +2514,11 @@ def generate_ai_synthesis(user_id: str):
             score = sum(float(k.get("obtainedPoints") or k.get("obtained") or 0) for k in ashtaKoota if isinstance(k, dict))
 
         if score is None:
-            score = report.get("totalPoints")
-        if score is None:
-            score = report.get("totalScore")
-        if score is None:
-            score = data.get("totalScore")
-        if score is None:
-            score = 0.0
+            score = report.get("totalPoints") or report.get("totalScore") or data.get("totalScore") or 0.0
 
         max_score = data.get("maxScore") or report.get("maxPoints") or 36.0
 
+        # Auto calculate if details are missing
         partner1_manglik_status = (
             data.get("partner1ManglikStatus")
             or report.get("partner1ManglikStatus")
@@ -2348,30 +2530,24 @@ def generate_ai_synthesis(user_id: str):
             or (report.get("manglik") or {}).get("status", {}).get("partner2")
         )
 
-        # Auto calculate if missing
-        if (
-            not partner1_manglik_status
-            or "unavailable" in str(partner1_manglik_status).lower()
-            or not partner2_manglik_status
-            or "unavailable" in str(partner2_manglik_status).lower()
-            or not ashtaKoota
-        ):
+        p1_candidate = partner1 if (partner1.get("dob") or partner1.get("birthDate")) else (body.get("partner1") or {})
+        p2_candidate = partner2 if (partner2.get("dob") or partner2.get("birthDate")) else (body.get("partner2") or {})
+        
+        calc_res = None
+        if (p1_candidate.get("dob") or p1_candidate.get("birthDate")) and (p2_candidate.get("dob") or p2_candidate.get("birthDate")):
             try:
-                p1_candidate = partner1 if (partner1.get("dob") or partner1.get("birthDate")) else (body.get("partner1") or {})
-                p2_candidate = partner2 if (partner2.get("dob") or partner2.get("birthDate")) else (body.get("partner2") or {})
-                if (p1_candidate.get("dob") or p1_candidate.get("birthDate")) and (p2_candidate.get("dob") or p2_candidate.get("birthDate")):
-                    p1_prep = prepare_partner(p1_candidate)
-                    p2_prep = prepare_partner(p2_candidate)
-                    calc_res = calculate_kundli_milan(p1_prep, p2_prep)
-                    if calc_res:
-                        if not partner1_manglik_status or "unavailable" in str(partner1_manglik_status).lower():
-                            partner1_manglik_status = calc_res.get("partner1ManglikStatus")
-                        if not partner2_manglik_status or "unavailable" in str(partner2_manglik_status).lower():
-                            partner2_manglik_status = calc_res.get("partner2ManglikStatus")
-                        if not ashtaKoota:
-                            ashtaKoota = (calc_res.get("report") or {}).get("ashtaKoota") or {}
-                        if not score:
-                            score = calc_res.get("totalScore") or score
+                p1_prep = prepare_partner(p1_candidate)
+                p2_prep = prepare_partner(p2_candidate)
+                calc_res = calculate_kundli_milan(p1_prep, p2_prep)
+                if calc_res:
+                    if not partner1_manglik_status or "unavailable" in str(partner1_manglik_status).lower():
+                        partner1_manglik_status = calc_res.get("partner1ManglikStatus")
+                    if not partner2_manglik_status or "unavailable" in str(partner2_manglik_status).lower():
+                        partner2_manglik_status = calc_res.get("partner2ManglikStatus")
+                    if not ashtaKoota:
+                        ashtaKoota = (calc_res.get("report") or {}).get("ashtaKoota") or {}
+                    if not score:
+                        score = calc_res.get("totalScore") or score
             except Exception as auto_calc_err:
                 print(f"Auto Kundli Milan calculation in synthesis: {auto_calc_err}")
 
@@ -2380,14 +2556,33 @@ def generate_ai_synthesis(user_id: str):
         if not partner2_manglik_status or "unavailable" in str(partner2_manglik_status).lower():
             partner2_manglik_status = f"{p2_name} has no Manglik Dosha"
 
+        cache_key = f"{user_id}_{p1_name}_{p2_name}_{score}_{lang}"
+        if not force_refresh and cache_key in _MATCHMAKING_AI_CACHE:
+            cached_data = _MATCHMAKING_AI_CACHE[cache_key]
+            return jsonify({
+                "synthesisId": cached_data.get("synthesisId", str(uuid.uuid4())),
+                "synthesis": cached_data.get("synthesis"),
+                "status": "cached",
+                "language": lang,
+            })
+
         # Baseline deterministic synthesis
         baseline_synthesis = build_deterministic_synthesis(
             partner1, partner2, ashtaKoota, score, max_score,
-            partner1_manglik_status, partner2_manglik_status
+            partner1_manglik_status, partner2_manglik_status, lang
         )
 
-        system_prompt = """
-You are an expert AI Vedic Astrological Counselor for a Jyotish matchmaking application.
+        # Build language-specific system prompt
+        lang_instructions = {
+            "hi": "भाषा: हिन्दी (प्रामाणिक, सुरुचिपूर्ण, शुद्ध वैदिक ज्योतिषीय भाषा)। केवल मान्य JSON लौटाएं।",
+            "bn": "ভাষা: বাংলা (সাবলীল, মার্জিত, প্রামাণিক বৈদিক জ্যোতিষীয় ভাষা)। শুধুমাত্র বৈধ JSON দিন।",
+            "ta": "மொழி: தமிழ் (இயல்பான, மங்களகரமான, தூய வேத ஜோதிட உரை). செல்லுபடியாகும் JSON மட்டுமே.",
+            "fr": "Langue : Français (élégant, naturel, bienveillant, respectant la sagesse védique). Retournez UNIQUEMENT un objet JSON valide.",
+            "en": "Language: English (classical, insightful, uplifting Vedic prose). Return ONLY a single valid JSON object."
+        }
+
+        system_prompt = f"""You are an expert AI Vedic Astrological Counselor (Daivajna) for a Jyotish matchmaking application.
+{lang_instructions.get(lang, lang_instructions["en"])}
 
 CRITICAL INSTRUCTIONS:
 1. Return ONLY a single valid JSON object. Do not include markdown fences (```json), commentary, or extra text.
@@ -2395,7 +2590,10 @@ CRITICAL INSTRUCTIONS:
 3. NEVER return single-word or brief answers (such as "Moderate", "Good", "Challenging", or "Average").
 4. NEVER return nested objects or dictionaries for narrative keys.
 5. For list keys (major_strengths, major_challenges, conflict_resolution, vedic_remedies), return a JSON array of complete, descriptive strings (each 1-2 sentences).
-6. Use the supplied Ashta Koota scores and Manglik statuses exactly as provided. Do not recalculate or invent different scores.
+6. STRICT ADHERENCE TO GROUND TRUTH ASTROLOGICAL FACTS:
+   - Use the supplied Ashta Koota scores and Manglik statuses exactly as provided. Do not recalculate or invent different scores.
+   - NEVER state that a partner is Manglik if the ground truth states Non-Manglik or No Dosha.
+   - NEVER print placeholder names like 'Moon Rashi', 'Nakshatra', or empty parens '(None vs None)'.
 
 Required JSON keys:
 - overall_compatibility (string: 3-5 complete sentences)
@@ -2417,55 +2615,49 @@ Required JSON keys:
 """
 
         prompt = f"""
-PARTNER 1:
-{json.dumps(partner1, ensure_ascii=False, indent=2)}
+GROUND TRUTH JYOTISH DATA:
+PARTNER 1: {p1_name} | Manglik Status: {partner1_manglik_status}
+PARTNER 2: {p2_name} | Manglik Status: {partner2_manglik_status}
+TOTAL ASHTA KOOTA SCORE: {score}/36
+TARGET LANGUAGE: {lang}
 
-PARTNER 2:
-{json.dumps(partner2, ensure_ascii=False, indent=2)}
-
-ASHTA KOOTA:
+ASHTA KOOTA BREAKDOWN:
 {json.dumps(ashtaKoota, ensure_ascii=False, indent=2)}
 
-TOTAL ASHTA KOOTA SCORE:
-{score}/36
-
-PARTNER 1 MANGLIK STATUS:
-{partner1_manglik_status}
-
-PARTNER 2 MANGLIK STATUS:
-{partner2_manglik_status}
-
-PARTNER 1 NAME:
-{p1_name}
-
-PARTNER 2 NAME:
-{p2_name}
-
-Provide a comprehensive, highly insightful Vedic Jyotish synthesis for {p1_name} and {p2_name}.
+Provide a comprehensive, highly insightful Vedic Jyotish synthesis for {p1_name} and {p2_name} in {lang}.
 Ensure each narrative section is a rich paragraph of 3 to 5 full sentences.
 Do NOT output single words like 'Moderate' or raw JSON dictionaries for narrative fields.
 """
 
         ai_synthesis_data = None
-        try:
-            raw_synthesis = get_ai_response(
-                system_prompt,
-                [{"role": "user", "content": prompt}]
-            )
-            if raw_synthesis:
-                cleaned = raw_synthesis.strip()
-                if cleaned.startswith("```"):
-                    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-                    cleaned = re.sub(r"\s*```$", "", cleaned)
-                    cleaned = cleaned.strip()
-                parsed = json.loads(cleaned)
-                if isinstance(parsed, dict):
-                    ai_synthesis_data = parsed
-        except Exception as ai_err:
-            print(f"Notice: AI synthesis generation encountered error/timeout: {ai_err}. Using deterministic baseline.")
+        for attempt in range(2):
+            try:
+                raw_synthesis = _execute_llm(
+                    system_prompt,
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=2500
+                )
+                if raw_synthesis:
+                    cleaned = raw_synthesis.strip()
+                    if cleaned.startswith("```"):
+                        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+                        cleaned = re.sub(r"\s*```$", "", cleaned)
+                        cleaned = cleaned.strip()
+                    parsed = json.loads(cleaned)
+                    if isinstance(parsed, dict) and "overall_compatibility" in parsed:
+                        # Script check for Indic languages
+                        if _verify_script(parsed.get("overall_compatibility", ""), lang):
+                            ai_synthesis_data = parsed
+                            break
+                        else:
+                            print(f"[Matchmaking AI] Script verification failed for {lang} on attempt {attempt+1}")
+            except Exception as ai_err:
+                print(f"[Matchmaking AI] Attempt {attempt+1} error: {ai_err}")
 
         # Harmonize with baseline
         synthesis_data = dict(baseline_synthesis)
+        synthesis_data["language"] = lang
+
         if ai_synthesis_data:
             narrative_keys = [
                 "overall_compatibility", "guna_milan", "psychological_affinity",
@@ -2475,7 +2667,7 @@ Do NOT output single words like 'Moderate' or raw JSON dictionaries for narrativ
             ]
             for nk in narrative_keys:
                 val = ai_synthesis_data.get(nk)
-                if isinstance(val, str) and len(val.strip()) >= 30:
+                if isinstance(val, str) and len(val.strip()) >= 20:
                     synthesis_data[nk] = val.strip()
 
             list_keys = ["major_strengths", "major_challenges", "conflict_resolution", "vedic_remedies"]
@@ -2486,11 +2678,11 @@ Do NOT output single words like 'Moderate' or raw JSON dictionaries for narrativ
                     if len(str_items) >= 2:
                         synthesis_data[lk] = str_items
 
-        # Ensure vedic_remedies is rich and never empty
-        if not synthesis_data.get("vedic_remedies") or len(synthesis_data["vedic_remedies"]) == 0:
-            synthesis_data["vedic_remedies"] = baseline_synthesis["vedic_remedies"]
+        latency = time.time() - start_time
+        print(f"[Matchmaking AI Synthesis] lang={lang}, latency={latency:.2f}s, success={ai_synthesis_data is not None}")
 
         # Save final synthesis
+        synthesis_id = str(uuid.uuid4())
         try:
             synthesis_id = save_ai_synthesis(
                 user_id=user_id,
@@ -2501,23 +2693,26 @@ Do NOT output single words like 'Moderate' or raw JSON dictionaries for narrativ
                 max_score=max_score,
                 partner1_manglik_status=partner1_manglik_status,
                 partner2_manglik_status=partner2_manglik_status,
-                synthesis_data=synthesis_data
+                synthesis_data=synthesis_data,
             )
-        except Exception as db_err:
-            print(f"Warning: Failed to save AI synthesis to database: {db_err}")
-            synthesis_id = str(uuid.uuid4())
+        except Exception as save_err:
+            print(f"[Matchmaking AI] Save to DB notice: {save_err}")
+
+        # Cache result
+        _MATCHMAKING_AI_CACHE[cache_key] = {
+            "synthesisId": synthesis_id,
+            "synthesis": synthesis_data,
+        }
 
         return jsonify({
-            "success": True,
             "synthesisId": synthesis_id,
-            "message": "AI synthesis generated and saved successfully",
-            "synthesis": synthesis_data
-        }), 200
-
-    except Exception as exc:
-        print(f"AI synthesis top-level error: {exc}")
-        return _error(f"AI synthesis failed: {exc}", "AI_SYNTHESIS_FAILED", 500)
-        
+            "synthesis": synthesis_data,
+            "status": "success",
+            "language": lang,
+        })
+    except Exception as e:
+        print(f"Error in generate_ai_synthesis: {e}")
+        return _error(f"Internal error generating AI synthesis: {e}", "SYNTHESIS_ERROR", 500)
 def generate_manglik_remedies_with_ai(manglik_status: dict) -> list:
 
     partner1_status = manglik_status.get(
