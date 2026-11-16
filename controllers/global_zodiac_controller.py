@@ -256,14 +256,51 @@ def zodiac_compatibility():
         return jsonify({"status": "success", "data": compat_data})
     except Exception as e:
         print(f"Error in zodiac_compatibility: {e}")
-        return jsonify({"status": "success", "data": {
-            "overallScore": 75,
-            "elementSynergy": f"Harmonious alignment between {sign_a} and {sign_b}.",
-            "romanceAnalysis": "Planetary energies create mutual attraction and shared vision.",
-            "intellectualAnalysis": "Dynamic communication fuels positive collaboration.",
-            "growthPotential": "Both signs empower each other toward spiritual and personal growth.",
-            "remedialAdvice": "Maintain patience and celebrate each other's individuality."
-        }})
+        lang_code = (language or "en").split("-")[0].lower()
+        fallback_texts = {
+            "hi": {
+                "overallScore": 75,
+                "elementSynergy": f"{sign_a.capitalize()} और {sign_b.capitalize()} के बीच सुंदर तत्व सामंजस्य।",
+                "romanceAnalysis": "ग्रहों की ऊर्जा पारस्परिक आकर्षण और साझा दृष्टिकोण का निर्माण करती है।",
+                "intellectualAnalysis": "सकारात्मक संवाद और आपसी समझ रिश्ते को सुदृढ़ बनाती है।",
+                "growthPotential": "दोनों राशियां एक-दूसरे को आत्मिक और व्यक्तिगत विकास के लिए प्रेरित करती हैं।",
+                "remedialAdvice": "धैर्य रखें और एक-दूसरे के व्यक्तित्व का सम्मान करें।"
+            },
+            "bn": {
+                "overallScore": 75,
+                "elementSynergy": f"{sign_a.capitalize()} এবং {sign_b.capitalize()}-এর প্রাকৃতিক উপাদানের চমৎকার সমন্বয়।",
+                "romanceAnalysis": "গ্রহদের ইতিবাচক প্রভাব উভয়ের মধ্যে গভীর আত্মিক ও মানসিক আকর্ষণ সৃষ্টি করে।",
+                "intellectualAnalysis": "খোলামেলা মতবিনিময় এবং পারস্পরিক বোঝাপড়া সম্পর্ককে স্থায়ী ভিত্তি দেয়।",
+                "growthPotential": "উভয় রাশি একসাথে পথচলায় নিজেদের মানসিক ও আধ্যাত্মিক উন্নতির দিকে এগিয়ে যায়।",
+                "remedialAdvice": "পারস্পরিক ধৈর্য এবং পরস্পরের স্বকীয়তার প্রতি শ্রদ্ধাশীল থাকুন।"
+            },
+            "ta": {
+                "overallScore": 75,
+                "elementSynergy": f"{sign_a.capitalize()} மற்றும் {sign_b.capitalize()} ஆகிய இரு ராசிகளின் பஞ்சபூத ஆற்றல் நல்லிணக்கம்.",
+                "romanceAnalysis": "கிரகங்களின் சேர்க்கை இருவரிடமும் ஆழமான ஈர்ப்பையும் அன்பையும் உருவாக்குகிறது.",
+                "intellectualAnalysis": "தெளிவான தகவல்தொடர்பும் பரஸ்பர புரிதலும் உறவை பலப்படுத்துகிறது.",
+                "growthPotential": "இருவரும் ஒருவரையொருவர் ஊக்கப்படுத்தி வாழ்வில் முன்னேற உதவுகிறார்கள்.",
+                "remedialAdvice": "பொறுமையுடன் செயல்பட்டு ஒருவரையொருவர் மதித்து நடப்பது நன்மை பயக்கும்."
+            },
+            "fr": {
+                "overallScore": 75,
+                "elementSynergy": f"Harmonie élémentaire naturelle entre {sign_a.capitalize()} et {sign_b.capitalize()}.",
+                "romanceAnalysis": "Les énergies planétaires favorisent une attraction mutuelle et une vision partagée.",
+                "intellectualAnalysis": "La communication dynamique enrichit leur collaboration bienveillante.",
+                "growthPotential": "Les deux partenaires s'élèvent mutuellement vers l'épanouissement personnel.",
+                "remedialAdvice": "Cultivez la patience et respectez l'individualité de chacun."
+            },
+            "en": {
+                "overallScore": 75,
+                "elementSynergy": f"Harmonious alignment between {sign_a.capitalize()} and {sign_b.capitalize()}.",
+                "romanceAnalysis": "Planetary energies create mutual attraction and shared vision.",
+                "intellectualAnalysis": "Dynamic communication fuels positive collaboration.",
+                "growthPotential": "Both signs empower each other toward spiritual and personal growth.",
+                "remedialAdvice": "Maintain patience and celebrate each other's individuality."
+            }
+        }
+        chosen = fallback_texts.get(lang_code, fallback_texts["en"])
+        return jsonify({"status": "success", "data": chosen})
 
 def subscribe_daily_update():
     """

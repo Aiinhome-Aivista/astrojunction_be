@@ -595,21 +595,33 @@ def get_zodiac_compatibility_response(
     system: str = "tropical",
     language: str = "en"
 ) -> str:
+    lang_code = (language or "en").split("-")[0].lower()
+    lang_names = {
+        "hi": "Hindi (हिन्दी)",
+        "bn": "Bengali (বাংলা)",
+        "ta": "Tamil (தமிழ்)",
+        "fr": "French (Français)",
+        "en": "English"
+    }
+    target_lang = lang_names.get(lang_code, "English")
+
     system_prompt = f"""You are an expert Vedic and Western Astrologer. Calculate the unique compatibility between {sign_a.capitalize()} and {sign_b.capitalize()} using the {system} system.
 Calculate a highly accurate overall compatibility score (0-100) based on elements, modalities, and planetary rulers.
-MUST respond ONLY with valid JSON, in language {language} (if 'bn' use Bengali). Do not include any comments or markdown inside the JSON object:
+You MUST respond with a valid JSON object ONLY, without any markdown formatting, code fences (no ```json), or commentary outside the JSON:
 {{
   "overallScore": 68,
-  "elementSynergy": "Short description of elemental synergy",
-  "romanceAnalysis": "2-3 sentences about their romantic and soul synergy.",
-  "intellectualAnalysis": "2-3 sentences about how their minds and communication match.",
-  "growthPotential": "2-3 sentences about how they help each other evolve.",
-  "remedialAdvice": "1 sentence of practical spiritual/astrological advice for this pairing."
+  "elementSynergy": "Short description of elemental synergy written entirely and fluently in {target_lang}",
+  "romanceAnalysis": "2-3 sentences about their romantic and soul synergy written entirely and fluently in {target_lang}.",
+  "intellectualAnalysis": "2-3 sentences about how their minds and communication match written entirely and fluently in {target_lang}.",
+  "growthPotential": "2-3 sentences about how they help each other evolve written entirely and fluently in {target_lang}.",
+  "remedialAdvice": "1 sentence of practical spiritual/astrological advice for this pairing written entirely and fluently in {target_lang}."
 }}
+CRITICAL LANGUAGE REQUIREMENT:
+All descriptive text values in the JSON ("elementSynergy", "romanceAnalysis", "intellectualAnalysis", "growthPotential", "remedialAdvice") MUST be written 100% in {target_lang}. Do NOT use English unless the requested language is English.
 IMPORTANT: Replace 68 with the ACTUAL calculated compatibility score between these two signs (e.g. Leo and Aries might be 90, while Aries and Cancer might be 45). Make sure the score varies based on true astrological principles.
 """
     
-    history = [{"role": "user", "content": f"Calculate compatibility between {sign_a} and {sign_b}."}]
+    history = [{"role": "user", "content": f"Calculate compatibility between {sign_a} and {sign_b} in {target_lang}."}]
     try:
         res = _execute_llm(system_prompt, history)
             
@@ -624,15 +636,51 @@ IMPORTANT: Replace 68 with the ACTUAL calculated compatibility score between the
         return res
     except Exception as e:
         print(f"Error in get_zodiac_compatibility_response: {e}")
-        # Fallback static response if LLM fails
-        return json.dumps({
-            "overallScore": 70,
-            "elementSynergy": f"Synergy between {sign_a} and {sign_b}.",
-            "romanceAnalysis": "They share a unique bond shaped by their planetary rulers.",
-            "intellectualAnalysis": "Communication requires mutual understanding and patience.",
-            "growthPotential": "They can learn a lot from each other's differences.",
-            "remedialAdvice": "Focus on open communication and respect for boundaries."
-        })
+        # Localized fallback static responses if LLM fails
+        fallbacks = {
+            "hi": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} और {sign_b.capitalize()} के तत्वों का सुंदर और सामंजस्यपूर्ण मिलन।",
+                "romanceAnalysis": "दोनों के बीच स्वाभाविक आकर्षण और भावनात्मक ऊर्जा का सुंदर प्रवाह रहता है।",
+                "intellectualAnalysis": "संवाद में खुलापन और एक-दूसरे के विचारों का आदर इस रिश्ते को मजबूती प्रदान करता है।",
+                "growthPotential": "एक-दूसरे के मतभेदों को समझकर दोनों व्यक्तिगत और आध्यात्मिक रूप से विकसित होते हैं।",
+                "remedialAdvice": "धैर्य बनाए रखें, नियमित संवाद रखें और एक-दूसरे के दृष्टिकोण का सम्मान करें।"
+            },
+            "bn": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} এবং {sign_b.capitalize()}-এর প্রাকৃতিক উপাদানের চমৎকার সমন্বয়।",
+                "romanceAnalysis": "উভয়ের মধ্যে সহজাত আকর্ষণ এবং গভীর মানসিক সংযোগ গড়ে ওঠে।",
+                "intellectualAnalysis": "খোলামেলা ভাববিনিময় এবং পারস্পরিক বোঝাপড়া সম্পর্ককে স্থিতিশীল রাখে।",
+                "growthPotential": "একসাথে পথচলা উভয়ের মানসিক পরিপক্কতা এবং আত্মিক অগ্রগতিতে সাহায্য করে।",
+                "remedialAdvice": "ধৈর্য ও পারস্পরিক বিশ্বাসের সাথে পরস্পরের স্বাতন্ত্র্যকে সম্মান জানান।"
+            },
+            "ta": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} மற்றும் {sign_b.capitalize()} ஆகிய இரு ராசிகளின் பஞ்சபூத ஆற்றல் நல்லிணக்கம்.",
+                "romanceAnalysis": "இருவரிடமும் இயற்கையான ஈர்ப்பும் ஆழமான அன்பும் மலர்கிறது.",
+                "intellectualAnalysis": "தெளிவான கருத்துப் பகிர்வும் பரஸ்பர புரிதலும் உறவை பலப்படுத்துகிறது.",
+                "growthPotential": "இருவரும் இணைந்து செயல்பட்டு வாழ்வில் புதிய உயரங்களை எட்ட முடியும்.",
+                "remedialAdvice": "பொறுமையுடன் செயல்பட்டு ஒருவரையொருவர் மதித்து நடப்பது நன்மை தரும்."
+            },
+            "fr": {
+                "overallScore": 72,
+                "elementSynergy": f"Harmonie élémentaire dynamique entre {sign_a.capitalize()} et {sign_b.capitalize()}.",
+                "romanceAnalysis": "Les énergies astrales créent une attraction mutuelle et une profonde complicité amoureuse.",
+                "intellectualAnalysis": "La communication bienveillante et l'écoute réciproque fortifient leur lien.",
+                "growthPotential": "Les partenaires s'inspirent mutuellement pour évoluer et grandir ensemble.",
+                "remedialAdvice": "Cultivez la patience et respectez l'espace et l'individualité de chacun."
+            },
+            "en": {
+                "overallScore": 72,
+                "elementSynergy": f"Harmonious elemental alignment between {sign_a.capitalize()} and {sign_b.capitalize()}.",
+                "romanceAnalysis": "Planetary energies foster natural attraction, mutual understanding, and shared vision.",
+                "intellectualAnalysis": "Open communication and respect for differences strengthen the partnership.",
+                "growthPotential": "Both partners support and empower each other toward personal evolution.",
+                "remedialAdvice": "Practice patience, celebrate individuality, and maintain open communication."
+            }
+        }
+        chosen = fallbacks.get(lang_code, fallbacks["en"])
+        return json.dumps(chosen, ensure_ascii=False)
 
 
 def get_numerology_insights_response(
