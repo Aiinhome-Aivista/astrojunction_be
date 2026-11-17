@@ -1,7 +1,13 @@
+import json
+import re
 from flask import request, jsonify, g
 from services.ephemeris_service import calculate_chart_data
 from services.chart_assembly_service import assemble_full_chart
 from database.db_connection import call_procedure
+try:
+    import json_repair
+except ImportError:
+    json_repair = None
 
 def _format_birth_time(value) -> str:
     """MySQL TIME columns come back as timedelta; normalise to HH:MM."""
@@ -322,29 +328,39 @@ def generate_birth_chart_pdf():
         if trad_synthesis:
             if isinstance(trad_synthesis, str):
                 trimmed_synth = trad_synthesis.strip()
-                if trimmed_synth.startswith("{") and trimmed_synth.endswith("}"):
-                    try:
-                        loaded = json.loads(trimmed_synth)
-                        if isinstance(loaded, dict) and "sections" in loaded and isinstance(loaded["sections"], list):
-                            parsed_synthesis_sections = loaded["sections"]
-                    except Exception:
-                        pass
-                elif "```" in trimmed_synth:
-                    import re
+                loaded = None
+                if "```" in trimmed_synth:
                     m = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', trimmed_synth)
                     if m:
+                        trimmed_synth = m.group(1).strip()
+                if "{" in trimmed_synth and "}" in trimmed_synth:
+                    s_idx = trimmed_synth.find("{")
+                    e_idx = trimmed_synth.rfind("}")
+                    if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+                        candidate_json = trimmed_synth[s_idx:e_idx+1]
                         try:
-                            loaded = json.loads(m.group(1))
-                            if isinstance(loaded, dict) and "sections" in loaded and isinstance(loaded["sections"], list):
-                                parsed_synthesis_sections = loaded["sections"]
+                            loaded = json.loads(candidate_json)
                         except Exception:
-                            pass
+                            if json_repair:
+                                try:
+                                    loaded = json_repair.loads(candidate_json)
+                                except Exception:
+                                    pass
+                if isinstance(loaded, dict) and "sections" in loaded and isinstance(loaded["sections"], list):
+                    parsed_synthesis_sections = loaded["sections"]
             elif isinstance(trad_synthesis, dict) and "sections" in trad_synthesis and isinstance(trad_synthesis["sections"], list):
                 parsed_synthesis_sections = trad_synthesis["sections"]
 
-        if not trad_synthesis and not parsed_synthesis_sections:
-            lang_dict = tradition_defaults.get(lang, tradition_defaults["en"])
-            trad_synthesis = lang_dict.get(tradition, lang_dict.get("parashari", ""))
+        # Ensure trad_synthesis is never output as raw JSON string
+        if parsed_synthesis_sections:
+            trad_synthesis = ""
+        else:
+            if isinstance(trad_synthesis, str) and (trad_synthesis.strip().startswith("{") or "{\"sections\"" in trad_synthesis or "sections" in trad_synthesis):
+                lang_dict = tradition_defaults.get(lang, tradition_defaults["en"])
+                trad_synthesis = lang_dict.get(tradition, lang_dict.get("parashari", ""))
+            elif not trad_synthesis:
+                lang_dict = tradition_defaults.get(lang, tradition_defaults["en"])
+                trad_synthesis = lang_dict.get(tradition, lang_dict.get("parashari", ""))
 
         tagline_map = {
             "en": f"Precision Astronomical Ephemeris • Parashari • Jaimini • Lal Kitab • KP • Nadi ({date_str})",
@@ -355,7 +371,7 @@ def generate_birth_chart_pdf():
         }
 
         data = {
-            "doc_title": "VEDIC BIRTH CHART & NATAL ANALYSIS" if lang == "en" else resolve_translation("birthChart.header.title", lang, labels, default="VEDIC BIRTH CHART & NATAL ANALYSIS"),
+            "doc_title": "VEDIC BIRTH CHART & NATAL ANALYSIS" if lang == "en" else resolve_translation("birthChart.pdf.report_title", lang, labels, default="VEDIC BIRTH CHART & NATAL ANALYSIS"),
             "doc_subtitle": trad_title,
             "doc_subtitle_tagline": tagline_map.get(lang, tagline_map["en"]),
             "doc_date": date_str,
