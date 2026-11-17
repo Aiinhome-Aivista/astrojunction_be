@@ -1,13 +1,48 @@
-venv
-env
+# Python Environment
+venv/
+env/
+.venv/
 .env
+.env.*
+!.env.example
+
+# Byte-compiled / optimized / cache files
 __pycache__/
-*.pyc
-failed.json
+*.py[cod]
+*$py.class
+*.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & temp files
 *.log
-.pytest_cache/
+failed.json
+*.tmp
+*.bak
+*.orig
+
+# Database dumps & local spreadsheets
+*.sql
 *.xlsx
-/lib
-*.zip
+*.csv
+
+# Cache & user-uploaded media (must never be pushed to git)
+upload/blog_translations_cache.json
+upload/blogs_image/
+upload/*.json
+cache/
+tmp/
+temp/
+
+# Geolocation databases & binary downloads
 *.mmdb
 data/geoip/
+/lib
+*.zip
+
+# Editor & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
