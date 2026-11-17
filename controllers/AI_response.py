@@ -130,19 +130,15 @@ def save_db_query_response(user_id: str, session_id: str, user_query: str, respo
 
 def direct_response_generate():
     data = request.get_json(silent=True) or {}
-    print("\n================ [AI_RESPONSE REQUEST RECEIVED] ================")
-    print("Raw Request Data:", json.dumps(data, indent=2))
     
     # Auto detect user_id and session_id
     user_id, session_id = extract_auto_user_and_session()
-    print(f"Auto-Detected -> user_id: '{user_id}', session_id: '{session_id}'")
 
     # Handle history reset
     if data.get("clear_history") is True or data.get("reset") is True:
         IN_MEMORY_SESSIONS[session_id] = []
         try:
             call_procedure("sp_clear_user_query_history", [user_id, session_id])
-            print(f"[SESSION {session_id} / USER {user_id}] History cleared in DB and memory.")
         except Exception as e:
             print(f"[DB CLEAR WARNING] {e}")
 
@@ -170,146 +166,137 @@ def direct_response_generate():
             history = history[:-1]
 
     if not prompt:
-        print("[AI_RESPONSE ERROR] No prompt provided.")
         return jsonify({"status": "error", "message": "Prompt is required"}), 400
 
-    # Build conversation history text for prompt context
-    history_text = ""
-    if isinstance(history, list) and len(history) > 0:
-        history_parts = []
-        for msg in history:
-            content = extract_msg_content(msg)
-            if content:
-                role = extract_msg_role(msg)
-                history_parts.append(f"{role}: {content}")
-        if history_parts:
-            history_text = "Previous Conversation History:\n" + "\n".join(history_parts) + "\n\n"
-            print("--- PARSED CONVERSATION HISTORY ---")
-            print(history_text)
-    else:
-        print("--- NO HISTORY SENT OR FOUND ---")
+    # Privacy: Log request metadata WITHOUT logging user message or keys
+    ui_lang = (data.get("lang") or data.get("language") or "en").strip().lower()
+    print(f"[AI_CHAT] user_id: '{user_id}', session_id: '{session_id}', prompt_chars: {len(prompt)}, ui_lang: '{ui_lang}'")
+
+    # Extract Chart Data, Profile, and Numerology from request
+    profile = data.get("profile") or {}
+    chart_data = data.get("chartData") or data.get("chart_data") or {}
+    numerology = data.get("numerology") or {}
+    tradition = data.get("tradition") or "parashari"
+
+    # If profile is missing or incomplete, attempt to retrieve from DB
+    if not profile or not profile.get("birthDate"):
+        try:
+            p_rows = call_procedure("sp_profile_ops", ['get_all', '', user_id, '', '', '2000-01-01', '00:00:00', '', 0, 0, 0, '[]', '', '', ''])
+            if p_rows:
+                db_p = p_rows[0]
+                profile = {
+                    "id": db_p.get("id"),
+                    "fullName": db_p.get("full_name"),
+                    "gender": db_p.get("gender"),
+                    "birthDate": db_p.get("birth_date"),
+                    "birthTime": db_p.get("birth_time"),
+                    "birthPlace": db_p.get("birth_place"),
+                    "latitude": db_p.get("latitude"),
+                    "longitude": db_p.get("longitude"),
+                    "timezone": db_p.get("timezone_offset", 5.5),
+                }
+        except Exception as e:
+            print(f"[AI_CHAT WARNING] Could not auto-fetch user profile from DB: {e}")
+
+    # If chart_data is missing but profile exists, compute chart data on the fly
+    if not chart_data and profile and profile.get("birthDate") and profile.get("birthTime"):
+        try:
+            from services.ephemeris_service import calculate_chart_data
+            from services.chart_assembly_service import assemble_full_chart
+            b_date = str(profile.get("birthDate"))
+            b_time = str(profile.get("birthTime"))[:5]
+            lat = float(profile.get("latitude") or 28.6139)
+            lon = float(profile.get("longitude") or 77.2090)
+            tz = float(profile.get("timezone") or 5.5)
+            ephem = calculate_chart_data(b_date, b_time, tz, lat, lon)
+            chart_data = assemble_full_chart(ephem, profile)
+        except Exception as e:
+            print(f"[AI_CHAT WARNING] Could not auto-calculate chart data: {e}")
+
+    # If numerology is missing but profile exists, compute numerology
+    if not numerology and profile and profile.get("birthDate"):
+        try:
+            from services.numerology_service import calculate_numerology_report
+            numerology = calculate_numerology_report(str(profile.get("birthDate")), profile.get("fullName", ""))
+        except Exception as e:
+            print(f"[AI_CHAT WARNING] Could not auto-calculate numerology: {e}")
 
     try:
-        from services.llm_service import generate_raw_completion
-        
-        system_instruction = (
-            "You are a helpful Astrology AI Assistant. Answer the user's current question accurately based on the conversation history provided below.\n\n"
-            "INSTRUCTIONS FOR CONVERSATION HISTORY & CONTEXT:\n"
-            "1. Pay close attention to the Previous Conversation History below to resolve pronouns (such as 'this', 'it', 'these') and follow-up questions.\n"
-            "2. Always focus on the MOST RECENT topic discussed in the conversation history or the user's current question.\n"
-            "3. If the user asks about a new topic, switch topics and answer the new topic directly.\n"
-            "If the question is completely unrelated to astrology, horoscopes, planets, or numerology (like coding, politics, or general chat), reply EXACTLY with: 'This is not my content, I am an astro AI'.\n\n"
-            "For astrology questions, you MUST reply ONLY with a valid JSON object in this format (no markdown code blocks, no text outside JSON):\n"
-            "{\n"
-            '  "answer": "Your detailed answer to the question",\n'
-            '  "suggested_questions": [\n'
-            '    "Suggested question 1?",\n'
-            '    "Suggested question 2?",\n'
-            '    "Suggested question 3?",\n'
-            '    "Suggested question 4?"\n'
-            '  ]\n'
-            "}\n\n"
-            f"{history_text}"
-            f"Current Question: {prompt}"
+        from services.chat_service import (
+            resolve_target_language,
+            build_ground_truth_context,
+            build_chat_system_prompt,
+            parse_and_repair_chat_response
+        )
+        from services.llm_service import generate_chat_counselling_response
+
+        # 1. Resolve Target Language & Script
+        target_lang = resolve_target_language(prompt, ui_lang=ui_lang)
+
+        # 2. Build Astrological Ground Truth Context (including time-based panchang if applicable)
+        ground_truth_context, _ = build_ground_truth_context(
+            profile=profile,
+            chart_data=chart_data,
+            numerology=numerology,
+            prompt=prompt,
+            tradition=tradition
         )
 
-        full_prompt = system_instruction
-        result = generate_raw_completion(full_prompt)
-        
-        if "This is not my content" in result:
-            return jsonify({
-                "status": "error",
-                "message": "This is not my content, I am an astro AI"
-            }), 400
+        # 3. Build System Prompt with strict Language and Ground Truth directives
+        system_prompt = build_chat_system_prompt(ground_truth_context, target_lang, tradition)
 
-        # Clean up markdown code blocks if present
-        clean_result = result.strip()
-        if clean_result.startswith("```json"):
-            clean_result = clean_result[7:]
-        elif clean_result.startswith("```"):
-            clean_result = clean_result[3:]
-        if clean_result.endswith("```"):
-            clean_result = clean_result[:-3]
-        clean_result = clean_result.strip()
+        # 4. Format conversation turns for LLM
+        history_turns = []
+        if isinstance(history, list):
+            for msg in history:
+                content = extract_msg_content(msg)
+                if content:
+                    role = extract_msg_role(msg).lower()
+                    if role in ["assistant", "bot", "ai", "model"]:
+                        history_turns.append({"role": "assistant", "content": content})
+                    else:
+                        history_turns.append({"role": "user", "content": content})
 
-        formatted_response = []
-        suggested_questions = []
+        # Append current user prompt as the active turn
+        history_turns.append({"role": "user", "content": prompt})
 
-        try:
-            parsed_data = json.loads(clean_result)
-            if isinstance(parsed_data, dict):
-                raw_answer = parsed_data.get("answer", "")
-                if isinstance(raw_answer, list):
-                    formatted_response = [str(line).strip() for line in raw_answer if str(line).strip()]
-                else:
-                    formatted_response = [line.strip() for line in str(raw_answer).split('\n') if line.strip()]
+        # 5. Call LLM through services.llm_service
+        raw_res = generate_chat_counselling_response(system_prompt, history_turns)
 
-                raw_suggestions = parsed_data.get("suggested_questions") or parsed_data.get("suggestions") or []
-                if isinstance(raw_suggestions, list):
-                    suggested_questions = [str(q).strip() for q in raw_suggestions if str(q).strip()]
-        except Exception:
-            lines = [line.strip() for line in result.split('\n') if line.strip()]
-            answer_lines = []
-            q_lines = []
-            in_suggestions = False
-            for line in lines:
-                if any(k in line.lower() for k in ["suggested", "follow-up", "questions"]):
-                    in_suggestions = True
-                    continue
-                if in_suggestions:
-                    clean_q = re.sub(r'^[0-9+*.\-\s]+', '', line).strip()
-                    if clean_q:
-                        q_lines.append(clean_q)
-                else:
-                    answer_lines.append(line)
+        # 6. Parse and repair JSON output safely
+        clean_answer, clean_follow_ups = parse_and_repair_chat_response(raw_res, target_lang)
 
-            formatted_response = answer_lines if answer_lines else lines
-            suggested_questions = q_lines
-
-        # Guarantee at least 4 suggested questions
-        if len(suggested_questions) < 4:
-            default_suggestions = [
-                "How does this astrological position affect my career and future growth?",
-                "What remedies or gemstones are recommended for balancing these planetary energies?",
-                "How will upcoming planetary transits influence this aspect of my life?",
-                "What timing or Dasha period is most favorable for taking action regarding this?"
-            ]
-            for ds in default_suggestions:
-                if ds not in suggested_questions:
-                    suggested_questions.append(ds)
-                if len(suggested_questions) >= 4:
-                    break
-
-        answer_text_summary = "\n".join(formatted_response) if isinstance(formatted_response, list) else str(formatted_response)
-
-        # 1. Save in MySQL Database (userid, userquery, response)
+        # 7. Persist to DB
         save_db_query_response(
             user_id=user_id,
             session_id=session_id,
             user_query=prompt,
-            response=answer_text_summary
+            response=clean_answer
         )
 
-        # 2. Append turn to in-memory fallback session history
+        # 8. Append turn to in-memory fallback session history
         if session_id not in IN_MEMORY_SESSIONS:
             IN_MEMORY_SESSIONS[session_id] = []
 
         IN_MEMORY_SESSIONS[session_id].append({"role": "user", "content": prompt})
-        IN_MEMORY_SESSIONS[session_id].append({"role": "assistant", "content": answer_text_summary})
+        IN_MEMORY_SESSIONS[session_id].append({"role": "assistant", "content": clean_answer})
 
         if len(IN_MEMORY_SESSIONS[session_id]) > MAX_SESSION_HISTORY * 2:
             IN_MEMORY_SESSIONS[session_id] = IN_MEMORY_SESSIONS[session_id][-MAX_SESSION_HISTORY * 2:]
 
         return jsonify({
             "status": "success",
+            "answer": clean_answer,
+            "follow_ups": clean_follow_ups,
+            "response": clean_answer,
+            "suggested_questions": clean_follow_ups,
             "user_id": user_id,
             "session_id": session_id,
-            "user_query": prompt,
-            "response": formatted_response,
-            "suggested_questions": suggested_questions,
+            "lang": target_lang
         })
+
     except Exception as e:
-        print(f"Error in direct_generate: {e}")
+        print(f"[AI_CHAT ERROR] direct_generate failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

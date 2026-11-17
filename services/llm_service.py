@@ -351,6 +351,18 @@ def get_ai_response(
     return _execute_llm(system_prompt, history)
 
 
+def generate_chat_counselling_response(
+    system_prompt: str,
+    history: list,
+    max_tokens: int = None
+) -> str:
+    """
+    Executes chat counselling turn using the active LLM configured in Admin Settings.
+    Ensures JSON mode is requested if 'json' is in system_prompt.
+    """
+    return _execute_llm(system_prompt, history, max_tokens=max_tokens)
+
+
 
 def get_daily_insights_response(
     profile: dict,
