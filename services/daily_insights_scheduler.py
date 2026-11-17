@@ -422,12 +422,6 @@ def fetch_and_store_daily_insights_for_all_signs(target_date: str = None, force:
         target_dt = datetime.strptime(target_date, "%Y-%m-%d").date() if isinstance(target_date, str) else target_date
         print(f"[Daily Insights Scheduler] Running batch horoscope generation (pyswisseph + Mistral) for {target_dt}...")
         run_batch_generation(period_mode="daily", target_date=target_dt, force=force)
-        # Background pre-warm Hindi & Bengali translations for landing page horoscope card
-        try:
-            from services.landing_translation import warm_up, PREWARM_LANGS
-            threading.Thread(target=warm_up, args=(["daily"], PREWARM_LANGS), daemon=True).start()
-        except Exception as w_err:
-            print(f"[Daily Insights Scheduler Warning] Pre-warm trigger error: {w_err}")
     except Exception as b_err:
         print(f"[Daily Insights Scheduler Warning] Batch generation encountered error: {b_err}")
 
@@ -821,7 +815,8 @@ def get_now_ist() -> datetime:
 def get_daily_scheduler_config() -> dict:
     """
     Reads the scheduler time and check interval dynamically from environment variables (.env).
-    - DAILY_INSIGHTS_SCHEDULER_TIME: 24-hr format HH:MM (e.g. '00:05', '05:00', '06:30', '10:30')
+    - DAILY_INSIGHTS_SCHEDULER_TIME: 24-hr format HH:MM (e.g. '12:50')
+    - DAILY_TRANSLATION_SCHEDULER_TIME: 24-hr format HH:MM (e.g. '12:55', defaults to insights time)
     - DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS: Daemon periodic check frequency in seconds (default: 60)
     """
     try:
@@ -838,6 +833,14 @@ def get_daily_scheduler_config() -> dict:
     except Exception:
         target_hour, target_minute = 10, 30
 
+    trans_time_str = os.getenv("DAILY_TRANSLATION_SCHEDULER_TIME", time_str).strip()
+    try:
+        t_parts = trans_time_str.split(":")
+        trans_hour = int(t_parts[0])
+        trans_minute = int(t_parts[1]) if len(t_parts) > 1 else 0
+    except Exception:
+        trans_hour, trans_minute = target_hour, target_minute
+
     try:
         check_interval = int(os.getenv("DAILY_INSIGHTS_CHECK_INTERVAL_SECONDS", "60"))
         if check_interval < 5:
@@ -849,6 +852,9 @@ def get_daily_scheduler_config() -> dict:
         "time_str": f"{target_hour:02d}:{target_minute:02d}",
         "target_hour": target_hour,
         "target_minute": target_minute,
+        "trans_time_str": f"{trans_hour:02d}:{trans_minute:02d}",
+        "trans_hour": trans_hour,
+        "trans_minute": trans_minute,
         "check_interval": check_interval
     }
 
@@ -862,16 +868,17 @@ def _scheduler_worker():
     now_startup = get_now_ist()
     today_str = str(now_startup.date())
     try:
-        # On server startup, ensure today's insights exist for all 12 signs without overwriting if already generated
-        fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
-        # Startup catch-up: if current week's rows are missing (<96), generate only the missing ones
-        ensure_weekly_insights_ready(target_date=now_startup.date(), force=False)
-        # Startup catch-up: if current month's rows are missing (<192), generate only the missing ones
-        ensure_monthly_insights_ready(target_date=now_startup.date(), force=False)
-        # Startup catch-up: if current year's rows are missing (<192), generate only the missing ones
-        ensure_yearly_insights_ready(target_year=now_startup.year, force=False)
+        # Check if today's daily insights already exist; if so, skip startup generation completely
+        existing_test = get_sign_daily_insights_from_db("aries", today_str)
+        if not existing_test:
+            fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
+            ensure_weekly_insights_ready(target_date=now_startup.date(), force=False)
+            ensure_monthly_insights_ready(target_date=now_startup.date(), force=False)
+            ensure_yearly_insights_ready(target_year=now_startup.year, force=False)
     except Exception as e:
-        print(f"[Daily Insights Scheduler] Startup check encountered exception: {e}")
+        print(f"[Daily Insights Scheduler] Startup check notice: {e}")
+
+    print(f"[Daily Insights Scheduler] Ready. Daily batch: {config['time_str']} IST | Daily translation: {config['trans_time_str']} IST. Schedulers are idle.")
 
     # Single-run mode: defaults to False so scheduler runs continuously every day
     run_once = os.getenv("DAILY_INSIGHTS_RUN_ONCE", "false").lower() in ("true", "1", "yes")
@@ -880,11 +887,15 @@ def _scheduler_worker():
         return
 
     last_scheduled_date_run = None
+    last_translation_date_run = None
+    last_passive_attempt_date = None
     # If today already has full data at startup, record today's date as processed for the scheduled daily batch
     try:
         existing_test = get_sign_daily_insights_from_db("aries", today_str)
         if existing_test:
             last_scheduled_date_run = now_startup.date()
+            last_translation_date_run = now_startup.date()
+            last_passive_attempt_date = now_startup.date()
     except Exception:
         pass
 
@@ -920,23 +931,40 @@ def _scheduler_worker():
                     print(f"[Daily Insights Scheduler] Jan 1 detected! Triggering scheduled yearly batch generation for {today_date.year}...")
                     ensure_yearly_insights_ready(target_year=today_date.year, force=True)
                 last_scheduled_date_run = today_date
-            else:
-                # Passive check: ONLY if today's rows are incomplete in DB (< 192 rows), then trigger catch-up
-                try:
-                    conn = get_db_connection()
-                    try:
-                        cur = conn.cursor()
-                        cur.execute("SELECT COUNT(*) FROM `horoscopes` WHERE `period` = 'daily' AND `period_start` = %s;", (today_date,))
-                        cnt = cur.fetchone()[0]
-                        cur.close()
-                    finally:
-                        conn.close()
+                last_passive_attempt_date = today_date
+                print(f"[Daily Insights Scheduler] Daily batch completed for {today_str}. Next run scheduled for tomorrow at {config['time_str']} IST.")
 
-                    if cnt < 192:
-                        print(f"[Daily Insights Scheduler] Incomplete daily rows detected ({cnt}/192). Generating missing rows...")
-                        fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
-                except Exception as check_err:
-                    print(f"[Daily Insights Scheduler] Passive check error: {check_err}")
+            # Trigger fresh daily translation pre-warm when scheduled translation time is reached on a new day
+            is_new_trans_day = (last_translation_date_run != today_date)
+            has_reached_trans_time = (now.hour > config["trans_hour"]) or (now.hour == config["trans_hour"] and now.minute >= config["trans_minute"])
+
+            if is_new_trans_day and has_reached_trans_time:
+                last_translation_date_run = today_date
+                try:
+                    print(f"[Daily Translation Scheduler] Triggering daily horoscope pre-warm translations for {today_str} at {now.strftime('%H:%M:%S')} IST (Configured time: {config['trans_time_str']} IST)...")
+                    from services.landing_translation import warm_up, PREWARM_LANGS
+                    threading.Thread(target=warm_up, args=(["daily"], PREWARM_LANGS), daemon=True).start()
+                except Exception as t_err:
+                    print(f"[Daily Translation Scheduler] Translation trigger notice: {t_err}")
+            elif not (is_new_day and has_reached_time):
+                # Passive check: attempt catch-up at most ONCE per day to prevent terminal log flooding every 60s
+                if last_passive_attempt_date != today_date:
+                    last_passive_attempt_date = today_date
+                    try:
+                        conn = get_db_connection()
+                        try:
+                            cur = conn.cursor()
+                            cur.execute("SELECT COUNT(*) FROM `horoscopes` WHERE `period` = 'daily' AND `period_start` = %s;", (today_date,))
+                            cnt = cur.fetchone()[0]
+                            cur.close()
+                        finally:
+                            conn.close()
+
+                        if cnt < 192:
+                            print(f"[Daily Insights Scheduler] Catch-up: Incomplete daily rows detected ({cnt}/192). Generating missing rows...")
+                            fetch_and_store_daily_insights_for_all_signs(target_date=today_str, force=False)
+                    except Exception as check_err:
+                        print(f"[Daily Insights Scheduler] Passive check notice: {check_err}")
         except Exception as e:
             print(f"[Daily Insights Scheduler] Loop error: {e}")
 
