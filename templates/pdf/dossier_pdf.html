@@ -15,7 +15,7 @@
       {{ t('birthChart.pdf.born', 'Born') }}: {{ d(profile.birthDate) }}{% if profile.birthTime %} at {{ d(profile.birthTime) }}{% endif %} | {{ profile.birthPlace or 'Global' }}
     </div>
     <div class="box-meta" style="margin-top: 2pt;">
-      {{ t('numerology.methodology', 'Methodology: Vedic Sidereal & Chaldean Sacred Vibration Matrix') }}
+      {{ t('numerology.pdf.methodology', 'Methodology: Vedic Sidereal & Chaldean Sacred Vibration Matrix') }}
     </div>
   </div>
   <div class="particulars-col-right">
@@ -33,12 +33,12 @@
 <!-- 2. Mulank & Bhagyank Vibrational Synthesis -->
 <div class="card-gold avoid-break" style="margin-bottom: 6pt; padding: 5pt 8pt;">
   <div class="card-gold-title">
-    {{ t('numerology.synthesis.title', 'MULANK & BHAGYANK VIBRATIONAL SYNTHESIS') }}
+    {{ t('numerology.pdf.synthesis_title', 'MULANK & BHAGYANK VIBRATIONAL SYNTHESIS') }}
   </div>
   <div style="display: flex; gap: 8pt;">
     <div style="flex: 1; padding: 3.5pt 6pt; background: #FDFCF9; border: 0.3pt solid #E2D3B0; border-radius: 3pt;">
       <div style="font-weight: 700; color: #7E5F18; font-size: 7.8pt; margin-bottom: 2pt;">
-        {{ t('numerology.pdf.mulank', 'Mulank') }} ({{ t('numerology.psychic_number', 'Psychic / Driver Number') }}): {{ d(numerology.mulank) }}
+        {{ t('numerology.pdf.mulank', 'Mulank') }} ({{ t('numerology.pdf.driver_num', 'Psychic / Driver Number') }}): {{ d(numerology.mulank) }}
       </div>
       <div style="font-size: 7pt; color: #3C3831; line-height: 1.4;">
         <strong>{{ t('numerology.pdf.planet', 'Ruling Energy') }}:</strong> {% if lang == 'en' %}{{ numerology.mulankPlanet or 'Sun (Surya)' }}{% else %}{{ t_mulank_planet(numerology.mulank) }}{% endif %}<br>
@@ -48,7 +48,7 @@
 
     <div style="flex: 1; padding: 3.5pt 6pt; background: #FDFCF9; border: 0.3pt solid #E2D3B0; border-radius: 3pt;">
       <div style="font-weight: 700; color: #7E5F18; font-size: 7.8pt; margin-bottom: 2pt;">
-        {{ t('numerology.pdf.bhagyank', 'Bhagyank') }} ({{ t('numerology.destiny_number', 'Destiny / Conductor Number') }}): {{ d(numerology.bhagyank) }}
+        {{ t('numerology.pdf.bhagyank', 'Bhagyank') }} ({{ t('numerology.pdf.conductor_num', 'Destiny / Conductor Number') }}): {{ d(numerology.bhagyank) }}
       </div>
       <div style="font-size: 7pt; color: #3C3831; line-height: 1.4;">
         <strong>{{ t('numerology.pdf.planet', 'Ruling Energy') }}:</strong> {% if lang == 'en' %}{{ numerology.bhagyankPlanet or 'Jupiter (Guru)' }}{% else %}{{ t_mulank_planet(numerology.bhagyank) }}{% endif %}<br>
@@ -239,7 +239,7 @@
 {% endif %}
 <div class="card-gold avoid-break" style="margin-bottom: 5pt; padding: 5.5pt 8.5pt; border-left: 2.8pt solid {% if m.status == 'Completed' %}#10B981{% elif m.status == 'In-Progress' %}#C9A050{% else %}#A0A0A0{% endif %};">
   <div style="font-weight: 700; color: #1A1A1E; font-size: 8.5pt; margin-bottom: 2pt;">
-    {{ d(loop.index) }}. {{ m.title }} [{{ d(m.timeframe or selectedHorizon) }}]
+    {{ d(loop.index) }}. {{ m.title }} [{{ t_horizon(m.timeframe or selectedHorizon) }}]
   </div>
   <div style="font-size: 6.8pt; font-weight: 700; color: #7E5F18; text-transform: uppercase; margin-bottom: 2pt;">
     {{ t('roadmap.card_sections.dasha_guidance', 'DASHA & LIFE STRATEGY GUIDANCE') }}
@@ -248,7 +248,7 @@
     {{ m.guidance or m.prediction }}
   </div>
   <div style="font-size: 7pt; line-height: 1.4; color: #555044;">
-    <strong style="color: #966C1E;">{{ t('roadmap.card_sections.astrological_window', 'Astrological Window & Transits') }}:</strong> {{ m.transit }}
+    <strong style="color: #966C1E;">{{ t('roadmap.card_sections.astrological_transits', 'Astrological Window & Transits') }}:</strong> {{ m.transit }}
   </div>
   <div style="font-size: 7pt; line-height: 1.4; color: #555044; margin-top: 1pt;">
     <strong style="color: #7E5F18;">{{ t('roadmap.card_sections.recommended_upaya', 'Recommended Upaya / Sadhana') }}:</strong> {{ m.upaya }}

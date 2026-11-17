@@ -222,10 +222,19 @@ def generate_daily_insights_pdf():
         if "ascendant" not in chart_data or not chart_data["ascendant"]:
             chart_data["ascendant"] = {"signName": "Pisces", "signSanskrit": "মীন" if lang == "bn" else "Meena"}
 
+        from services.pdf_service import format_localized_digits
+        tagline_map = {
+            "en": f"Precision Astronomical Ephemeris • Drig-Ganita Panchanga ({date_str})",
+            "hi": f"सटीक खगोलीय पंचांग • दृक-गणित पंचांग ({format_localized_digits(date_str, 'hi')})",
+            "bn": f"নিখুঁত জ্যোতির্বিজ্ঞানসম্মত পঞ্জিকা • দৃক-গণিত পঞ্চাঙ্গ ({format_localized_digits(date_str, 'bn')})",
+            "ta": f"துல்லிய வானியல் பஞ்சாங்கம் • திருக்கணித பஞ்சாங்கம் ({date_str})",
+            "fr": f"Éphémérides Astronomiques de Précision • Panchanga Drig-Ganita ({date_str})"
+        }
+
         data = {
             "doc_title": "DAILY VEDIC INSIGHTS & PLANETARY TRANSITS" if lang == "en" else doc_title,
             "doc_subtitle": doc_subtitle,
-            "doc_subtitle_tagline": f"Precision Astronomical Ephemeris • Drig-Ganita Panchanga ({date_str})",
+            "doc_subtitle_tagline": tagline_map.get(lang, tagline_map["en"]),
             "doc_date": date_str,
             "profile": profile,
             "panchang": panchang,

@@ -100,6 +100,12 @@ def resolve_translation(key: str, lang: str, custom_labels: Optional[Dict[str, A
     if key.endswith(".born") or key.endswith(".client_particulars"):
         for sec in ["birthChart", "roadmap", "numerology", "kundliMilan"]:
             candidate_keys.append(f"{sec}.pdf.{parts[-1]}")
+    if key.endswith(".coordinates"):
+        candidate_keys.append("birthChart.pdf.celestial_coords")
+        candidate_keys.append("birthChart.pdf.coordinates")
+        candidate_keys.append("roadmap.pdf.coordinates")
+    if "classes.aadi" in key:
+        candidate_keys.append(key.replace("classes.aadi", "classes.adi"))
 
     def _lookup_dict(d: Dict[str, Any], k: str) -> Any:
         if not d:
@@ -146,10 +152,16 @@ def resolve_translation(key: str, lang: str, custom_labels: Optional[Dict[str, A
     if res is None:
         res = default if default != "" else key
 
-    # 5. Interpolate placeholders {{k}} if string
-    if isinstance(res, str) and kwargs:
-        for k, v in kwargs.items():
-            res = res.replace(f"{{{{{k}}}}}", str(v))
+    # 5. Interpolate placeholders {{k}} and {k} if string
+    if isinstance(res, str):
+        if kwargs:
+            for k, v in kwargs.items():
+                res = res.replace(f"{{{{{k}}}}}", str(v))
+                res = res.replace(f"{{{k}}}", str(v))
+        # Safely clean any remaining un-interpolated {{placeholder}} or {placeholder}
+        import re
+        res = re.sub(r'\{\{\s*\w+\s*\}\}', '', res)
+        res = re.sub(r'\{[a-zA-Z_]\w*\}', '', res)
 
     return res
 
@@ -333,7 +345,13 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
         # 3. Nadi: e.g. "Adi Nadi", "Madhya Nadi", "Antya Nadi"
         if "nadi" in s.lower():
             n_base = s.lower().replace("nadi", "").strip()
+            if n_base in ["aadi", "adi"]:
+                n_base = "adi"
+            elif n_base in ["madhyama", "madhya"]:
+                n_base = "madhya"
             n_trans = resolve_translation(f"kundliMilan.classes.{n_base}", lang, labels, default="")
+            if not n_trans and n_base == "adi":
+                n_trans = resolve_translation("kundliMilan.classes.adi", lang, labels, default="")
             if n_trans:
                 if lang in ["en", "fr"]:
                     return f"{n_trans} Nadi"
@@ -360,6 +378,10 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
 
         # 5. Single class lookup: Varna, Vashya, Yoni, etc.
         ck = _clean_key(s)
+        if ck in ["aadi", "adi"]:
+            ck = "adi"
+        elif ck in ["madhyama", "madhya"]:
+            ck = "madhya"
         cls_trans = resolve_translation(f"kundliMilan.classes.{ck}", lang, labels, default="")
         if cls_trans:
             return cls_trans
@@ -551,6 +573,29 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
             return h_data["name"]
         return default_name
 
+    def t_horizon(val: Any) -> str:
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        m = re.match(r"^(\d+)-(\d+)\s*(Years?|Year|years?|year)?$", s, re.IGNORECASE)
+        if m:
+            start_n = m.group(1)
+            end_n = m.group(2)
+            d_start = format_localized_digits(start_n, lang)
+            d_end = format_localized_digits(end_n, lang)
+            if lang == "hi":
+                unit = "वर्ष"
+            elif lang == "bn":
+                unit = "বছর"
+            elif lang == "ta":
+                unit = "வருடம்" if end_n == "1" else "வருடங்கள்"
+            elif lang == "fr":
+                unit = "An" if end_n == "1" else "Ans"
+            else:
+                unit = "Year" if end_n == "1" else "Years"
+            return f"{d_start}-{d_end} {unit}"
+        return format_localized_digits(s, lang)
+
     context["t_planet"] = t_planet
     context["t_sign"] = t_sign
     context["t_nakshatra"] = t_nakshatra
@@ -569,6 +614,7 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
     context["t_days"] = t_days
     context["t_planets_list"] = t_planets_list
     context["t_house_name"] = t_house_name
+    context["t_horizon"] = t_horizon
 
     # Fonts base64 embedding per language
     font_css = []
@@ -625,7 +671,39 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
     context["bg_base64"] = get_asset_base64("astrologer_bg.jpg")
     if "doc_date_full" not in context:
         from datetime import datetime
-        context["doc_date_full"] = datetime.now().strftime("%a, %b %d, %Y, %I:%M %p")
+        now = datetime.now()
+        month_names = {
+            "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+            "hi": ["जनवरी", "फरवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"],
+            "bn": ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"],
+            "ta": ["ஜனவரி", "பிப்ரவரி", "மார்ச்", "ஏப்ரல்", "மே", "ஜூன்", "ஜூலை", "ஆகஸ்ட்", "செப்டம்பர்", "அக்டோபர்", "நவம்பர்", "டிசம்பர்"],
+            "fr": ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+        }
+        day_names = {
+            "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "hi": ["सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि", "रवि"],
+            "bn": ["সোম", "মঙ্গল", "বুধ", "বৃহস্পতি", "শুক্র", "শনি", "রবি"],
+            "ta": ["திங்கள்", "செவ்வாய்", "புதன்", "வியாழன்", "வெள்ளி", "சனி", "ஞாயிறு"],
+            "fr": ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+        }
+        m_idx = now.month - 1
+        d_idx = now.weekday()
+        m_str = month_names.get(lang, month_names["en"])[m_idx]
+        d_str = day_names.get(lang, day_names["en"])[d_idx]
+        hour_12 = now.hour % 12 or 12
+        if lang == "hi":
+            am_pm = "पूर्वाह्न" if now.hour < 12 else "अपराह्न"
+            context["doc_date_full"] = f"{d_str}, {format_localized_digits(now.day, lang)} {m_str} {format_localized_digits(now.year, lang)}, {format_localized_digits(f'{hour_12:02d}:{now.minute:02d}', lang)} {am_pm}"
+        elif lang == "bn":
+            am_pm = "পূর্বাহ্ন" if now.hour < 12 else "অপরাহ্ন"
+            context["doc_date_full"] = f"{d_str}, {format_localized_digits(now.day, lang)} {m_str} {format_localized_digits(now.year, lang)}, {format_localized_digits(f'{hour_12:02d}:{now.minute:02d}', lang)} {am_pm}"
+        elif lang == "ta":
+            am_pm = "மு.ப" if now.hour < 12 else "பி.ப"
+            context["doc_date_full"] = f"{d_str}, {now.day} {m_str} {now.year}, {hour_12:02d}:{now.minute:02d} {am_pm}"
+        elif lang == "fr":
+            context["doc_date_full"] = f"{d_str} {now.day} {m_str} {now.year}, {now.hour:02d}h{now.minute:02d}"
+        else:
+            context["doc_date_full"] = now.strftime("%a, %b %d, %Y, %I:%M %p")
 
     # Render HTML template via Jinja2
     tmpl = jinja_env.get_template(template_name)

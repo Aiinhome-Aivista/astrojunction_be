@@ -139,7 +139,7 @@
       {{ t('kundliMilan.pdf.nadi_title', 'Nadi & Bhakoot Disposition') }}
     </div>
     <div style="font-size: 7.5pt; color: #3C3831; line-height: 1.45;">
-      {{ matchResult.nadiBhakootAnalysis or t('kundliMilan.doshas.nadi_safe', 'Both horoscopes indicate genetically and psychologically harmonious lunar placement. No critical Nadi Mahadosha identified.') }}
+      {{ matchResult.nadiBhakootAnalysis or t('kundliMilan.doshas.nadi_safe', 'Both horoscopes indicate genetically and psychologically harmonious lunar placement. No critical Nadi Mahadosha identified.', nadi1=(partner1.nadi or t_koota_value('Adi')), nadi2=(partner2.nadi or t_koota_value('Antya'))) }}
     </div>
   </div>
 </div>

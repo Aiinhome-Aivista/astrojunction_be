@@ -116,7 +116,19 @@ def download_roadmap_pdf():
         moon_sign = chart_data.get("moonSign") or (moon_planet.get("signName") if moon_planet else "Gemini")
         nakshatra = f"{moon_planet.get('nakshatra')} (Pada {moon_planet.get('pada', 1)})" if moon_planet and moon_planet.get("nakshatra") else "Mrigashira (Pada 4)"
         active_dasha_obj = next((d for d in chart_data.get("dashaPeriods", []) if isinstance(d, dict) and d.get("isCurrent")), None)
-        active_dasha_text = f"{active_dasha_obj.get('planet', 'Vimshottari')} Mahadasha" if active_dasha_obj else "Active Vimshottari Mahadasha Cycle"
+        planet_name = active_dasha_obj.get('planet', 'Jupiter') if active_dasha_obj else "Jupiter"
+        from services.pdf_service import resolve_translation, format_localized_digits
+        trans_planet = resolve_translation(f"vedic.planets.{planet_name.lower()}", lang, labels, default=planet_name)
+        if lang == "hi":
+            active_dasha_text = f"सक्रिय विंशोत्तरी महादशा: {trans_planet} महादशा"
+        elif lang == "bn":
+            active_dasha_text = f"সক্রিয় বিংশোত্তরী মহাদশা: {trans_planet} মহাদশা"
+        elif lang == "ta":
+            active_dasha_text = f"செயலில் உள்ள விம்சோத்தரி மகாதிசை: {trans_planet} மகாதிசை"
+        elif lang == "fr":
+            active_dasha_text = f"Cycle Actif Vimshottari: Mahadasha de {trans_planet}"
+        else:
+            active_dasha_text = f"Active Vimshottari Mahadasha: {planet_name} Mahadasha"
 
         # Numerological coordinates
         mulank = numerology.get("mulank") or 8
@@ -153,11 +165,19 @@ def download_roadmap_pdf():
         doc_title = resolve_translation("roadmap.pdf.report_title", lang, labels, default=f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})")
         doc_subtitle = resolve_translation("roadmap.pdf.subtitle", lang, labels, default="Synthesized through Vimshottari Mahadasha/Antardasha cycles & planetary transits (2026 – 2051)")
 
+        tagline_map = {
+            "en": "Synthesized through Vimshottari Mahadasha/Antardasha cycles & planetary transits (2026 – 2051)",
+            "hi": f"विंशोत्तरी महादशा/अंतर्दशा चक्र एवं ग्रहीय गोचर के आधार पर संश्लेषित ({format_localized_digits(2026, 'hi')} – {format_localized_digits(2051, 'hi')})",
+            "bn": f"বিংশোত্তরী মহাদশা/অন্তর্দশা চক্র এবং গ্রহীয় গোচরের ভিত্তিতে সংশ্লেষিত ({format_localized_digits(2026, 'bn')} – {format_localized_digits(2051, 'bn')})",
+            "ta": "விம்சோத்தரி மகாதிசை/அந்தர்திசை சுழற்சிகள் மற்றும் கிரக பெயர்ச்சிகள் மூலம் தொகுக்கப்பட்டது (2026 – 2051)",
+            "fr": "Synthétisé à travers les cycles de Mahadasha/Antardasha Vimshottari et transits planétaires (2026 – 2051)"
+        }
+
         data = {
             "doc_type": "roadmap",
             "doc_title": f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})" if lang == "en" else resolve_translation("roadmap.pdf.report_title", lang, labels, default=f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})"),
             "doc_subtitle": doc_subtitle,
-            "doc_subtitle_tagline": "Synthesized through Vimshottari Mahadasha/Antardasha cycles & planetary transits (2026 – 2051)",
+            "doc_subtitle_tagline": tagline_map.get(lang, tagline_map["en"]),
             "doc_date": profile.get("birthDate") or datetime.now().strftime("%Y-%m-%d"),
             "profile": profile,
             "selectedHorizon": selected_horizon,

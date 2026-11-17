@@ -197,10 +197,10 @@
         {{ t('dailyInsights.pdf.morning_sadhana', 'MORNING SADHANA (PRABHAT KRIYA)') }}
       </div>
       <div style="font-size: 7pt; font-weight: 700; color: #1A1A1E; margin-bottom: 1pt;">
-        {{ rituals.morningTitle or 'Surya Arghya & Gayatri Meditative Invocation' }}
+        {{ rituals.morningTitle or t('dailyInsights.pdf.morning_title', 'Surya Arghya & Gayatri Meditative Invocation') }}
       </div>
       <div style="font-size: 6.2pt; line-height: 1.4; color: #46464B;">
-        {{ rituals.morningDesc or 'Offer clean water to the rising Sun in a copper vessel with sacred Gayatri vibration. Focus prana on third eye.' }}
+        {{ rituals.morningDesc or t('dailyInsights.pdf.morning_desc', 'Offer clean water to the rising Sun in a copper vessel with sacred Gayatri vibration. Focus prana on third eye.') }}
       </div>
     </div>
 
@@ -210,10 +210,10 @@
         {{ t('dailyInsights.pdf.evening_sadhana', 'EVENING SADHANA (SANDHYA KRIYA)') }}
       </div>
       <div style="font-size: 7pt; font-weight: 700; color: #1A1A1E; margin-bottom: 1pt;">
-        {{ rituals.eveningTitle or 'Deepa Daan & Peace Mantra Reflection' }}
+        {{ rituals.eveningTitle or t('dailyInsights.pdf.evening_title', 'Deepa Daan & Peace Mantra Reflection') }}
       </div>
       <div style="font-size: 6.2pt; line-height: 1.4; color: #46464B;">
-        {{ rituals.eveningDesc or 'Light a ghee lamp in the northeast quadrant during twilight. Chant Om Namah Shivaya 108 times for emotional equilibrium.' }}
+        {{ rituals.eveningDesc or t('dailyInsights.pdf.evening_desc', 'Light a ghee lamp in the northeast quadrant during twilight. Chant Om Namah Shivaya 108 times for emotional equilibrium.') }}
       </div>
     </div>
   </div>
@@ -225,7 +225,7 @@
     {{ t('dailyInsights.pdf.sankalpa', 'DAILY VEDIC SANKALPA & HARMONY AFFIRMATION') }}
   </div>
   <div style="font-size: 6.5pt; font-style: italic; color: #322D28; line-height: 1.45;">
-    &ldquo;Om Shanti Shanti Shanti &mdash; I consciously align my inner thoughts and outer deeds with universal dharma (Rta). Today brings purposeful focus, auspicious clarity, and divine protection to my journey.&rdquo;
+    &ldquo;{{ t('dailyInsights.pdf.sankalpa_text', 'Om Shanti Shanti Shanti — I consciously align my inner thoughts and outer deeds with universal dharma (Rta). Today brings purposeful focus, auspicious clarity, and divine protection to my journey.') }}&rdquo;
   </div>
 </div>
 
@@ -253,19 +253,19 @@
     <!-- Left Column -->
     <div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
-        <span style="color: #5F5A55;">Tithi (Lunar Day)</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_tithi', 'Tithi (Lunar Day)') }}</span>
         <strong style="color: #1A1A1E;">{{ panchang.tithi or 'Shukla Navami' }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
-        <span style="color: #5F5A55;">Nakshatra (Asterism)</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_nakshatra', 'Nakshatra (Asterism)') }}</span>
         <strong style="color: #1A1A1E;">{{ panchang.nakshatra or 'Pushya' }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
-        <span style="color: #5F5A55;">Vedic Yoga</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_yoga', 'Vedic Yoga') }}</span>
         <strong style="color: #1A1A1E;">{{ panchang.yoga or 'Sadhya' }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
-        <span style="color: #5F5A55;">Karana (Half Tithi)</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_karana', 'Karana (Half Tithi)') }}</span>
         <strong style="color: #1A1A1E;">{{ panchang.karana or 'Bava' }}</strong>
       </div>
     </div>
@@ -273,19 +273,19 @@
     <!-- Right Column -->
     <div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
-        <span style="color: #5F5A55;">Sun Sign (Surya Rashi)</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_sunsign', 'Sun Sign (Surya Rashi)') }}</span>
         <strong style="color: #1A1A1E;">{{ panchang.solarSign or chartData.sunSign or 'Leo' }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD; background: #FCFAF6;">
-        <span style="color: #8C500A; font-weight: 700;">Today's Transit Moon</span>
+        <span style="color: #8C500A; font-weight: 700;">{{ t('dailyInsights.pdf.panchang_moonsign', "Today's Transit Moon") }}</span>
         <strong style="color: #8C3C00;">{{ panchang.lunarSign or chartData.moonSign or 'Cancer' }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
-        <span style="color: #5F5A55;">Sunrise / Sunset</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_sun_times', 'Sunrise / Sunset') }}</span>
         <strong style="color: #1A1A1E;">{{ d(panchang.sunrise or '06:12 AM') }} / {{ d(panchang.sunset or '06:18 PM') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
-        <span style="color: #5F5A55;">Brahma Muhurta</span>
+        <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_brahma', 'Brahma Muhurta') }}</span>
         <strong style="color: #1A1A1E;">{{ d(panchang.brahmaMuhurta or '04:36 - 05:24 AM') }}</strong>
       </div>
     </div>
@@ -338,20 +338,20 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td style="padding: 2.5pt 5pt; font-weight: 600;">Sun (Surya)</td>
+          <td style="padding: 2.5pt 5pt; font-weight: 600;">{{ t_planet('Sun') }}</td>
           <td style="padding: 2.5pt 5pt; color: #5A5A50;">Surya</td>
-          <td style="padding: 2.5pt 5pt;">Leo</td>
-          <td style="padding: 2.5pt 5pt;">14.19&deg;</td>
-          <td style="padding: 2.5pt 5pt;">Uttara Phalguni (P3)</td>
-          <td style="padding: 2.5pt 5pt;">H4</td>
+          <td style="padding: 2.5pt 5pt;">{{ t_sign('Leo') }}</td>
+          <td style="padding: 2.5pt 5pt;">{{ d('14.19') }}&deg;</td>
+          <td style="padding: 2.5pt 5pt;">{{ t_nakshatra('Uttara Phalguni') }} (P{{ d(3) }})</td>
+          <td style="padding: 2.5pt 5pt;">H{{ d(4) }}</td>
         </tr>
         <tr style="background: #FAF6EF; font-weight: 700;">
-          <td style="color: #8C500A; padding: 2.5pt 5pt;">Moon (Janma Rashi)</td>
+          <td style="color: #8C500A; padding: 2.5pt 5pt;">{{ t_planet('Moon') }}</td>
           <td style="color: #825514; padding: 2.5pt 5pt;">Chandra</td>
-          <td style="color: #8C3C00; padding: 2.5pt 5pt;">Cancer</td>
-          <td style="padding: 2.5pt 5pt;">5.02&deg;</td>
-          <td style="padding: 2.5pt 5pt;">Ashlesha (P4)</td>
-          <td style="padding: 2.5pt 5pt;">H8</td>
+          <td style="color: #8C3C00; padding: 2.5pt 5pt;">{{ t_sign('Cancer') }}</td>
+          <td style="padding: 2.5pt 5pt;">{{ d('5.02') }}&deg;</td>
+          <td style="padding: 2.5pt 5pt;">{{ t_nakshatra('Ashlesha') }} (P{{ d(4) }})</td>
+          <td style="padding: 2.5pt 5pt;">H{{ d(8) }}</td>
         </tr>
       {% endif %}
     </tbody>
@@ -425,7 +425,7 @@
       </div>
     </div>
     <div style="font-size: 6.2pt; color: #323237; margin-bottom: 4pt;">
-      &bull; Bhagyank (Destiny): {{ d(numerology.bhagyank or 1) }} | Namank: {{ d(numerology.namankChaldean or 1) }}
+      &bull; {{ t('dailyInsights.pdf.bhagyank', 'Bhagyank (Destiny)') }}: {{ d(numerology.bhagyank or 1) }} | {{ t('dailyInsights.pdf.namank', 'Namank') }}: {{ d(numerology.namankChaldean or 1) }}
     </div>
 
     <div style="font-size: 6.2pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
@@ -433,15 +433,15 @@
     </div>
     <div style="font-size: 6.2pt; color: #323237; line-height: 1.35; margin-bottom: 3pt;">
       <div>&bull; {{ t('dailyInsights.pdf.lucky_number_today', 'Lucky Number Today') }}: {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }} ({{ aiInsights.luckyPlanet or 'Sun' }})</div>
-      <div>&bull; {{ t('dailyInsights.pdf.lucky_color_today', 'Lucky Color & Tone') }}: {{ aiInsights.luckyColor or 'Bright Yellow' }}</div>
+      <div>&bull; {{ t('dailyInsights.pdf.lucky_color_today', 'Lucky Color & Tone', color=t_colors(aiInsights.luckyColor or 'Bright Yellow')) }}</div>
     </div>
 
     <div style="font-size: 6.2pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
       {{ t('dailyInsights.pdf.sacred_gems', 'SACRED REMEDIAL GEMS & DIRECTION') }}
     </div>
     <div style="font-size: 6.2pt; color: #323237; line-height: 1.35;">
-      <div>&bull; {{ t('dailyInsights.pdf.primary_gem', 'Primary Gem') }}: {{ numerology.luckyGemstones[0] if numerology.luckyGemstones else 'Ruby / Manikya' }}</div>
-      <div>&bull; {{ t('dailyInsights.pdf.favorable_days', 'Favorable Days') }}: {{ numerology.luckyDays | join(', ') if numerology.luckyDays else 'Sunday, Tuesday' }} | Dir: East</div>
+      <div>&bull; {{ t('dailyInsights.pdf.primary_gem', 'Primary Gem', gem=t_gem(numerology.luckyGemstones[0] if numerology.luckyGemstones else 'Ruby')) }}</div>
+      <div>&bull; {{ t('dailyInsights.pdf.favorable_days', 'Favorable Days') }}: {{ t_days(numerology.luckyDays | join(', ') if numerology.luckyDays else 'Sunday, Tuesday') }} | {{ t('dailyInsights.pdf.dir_east', 'Dir: East') }}</div>
     </div>
   </div>
 </div>

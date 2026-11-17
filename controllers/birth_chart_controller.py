@@ -346,10 +346,18 @@ def generate_birth_chart_pdf():
             lang_dict = tradition_defaults.get(lang, tradition_defaults["en"])
             trad_synthesis = lang_dict.get(tradition, lang_dict.get("parashari", ""))
 
+        tagline_map = {
+            "en": f"Precision Astronomical Ephemeris • Parashari • Jaimini • Lal Kitab • KP • Nadi ({date_str})",
+            "hi": f"सटीक खगोलीय पंचांग • पाराशर • जैमिनी • लाल किताब • के.पी. • नाड़ी ({format_localized_digits(date_str, 'hi')})",
+            "bn": f"নিখুঁত জ্যোতির্বিজ্ঞানসম্মত পঞ্জিকা • পরাশর • জৈমিনী • লাল কিতাব • কে.পি. • নাড়ী ({format_localized_digits(date_str, 'bn')})",
+            "ta": f"துல்லிய வானியல் பஞ்சாங்கம் • பராசர • ஜெமினி • லால் கிதாப் • கே.பி. • நாடி ({date_str})",
+            "fr": f"Éphémérides Astronomiques de Précision • Parashari • Jaimini • Lal Kitab • KP • Nadi ({date_str})"
+        }
+
         data = {
             "doc_title": "VEDIC BIRTH CHART & NATAL ANALYSIS" if lang == "en" else resolve_translation("birthChart.header.title", lang, labels, default="VEDIC BIRTH CHART & NATAL ANALYSIS"),
             "doc_subtitle": trad_title,
-            "doc_subtitle_tagline": f"Precision Astronomical Ephemeris • Parashari • Jaimini • Lal Kitab • KP • Nadi ({date_str})",
+            "doc_subtitle_tagline": tagline_map.get(lang, tagline_map["en"]),
             "doc_date": date_str,
             "profile": profile,
             "chartData": chart_data,
