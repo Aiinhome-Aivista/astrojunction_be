@@ -275,7 +275,7 @@ def generate_birth_chart_pdf():
             "kp_system": "KP System (Krishnamurti Padhdhati Placidus)",
             "bhrigu_nadi": "Bhrigu Nadi (Nandi Nadi Combinations)",
         }
-        from services.pdf_service import resolve_translation
+        from services.pdf_service import resolve_translation, format_localized_digits
         trad_title = resolve_translation(f"birthChart.nav.tradition_names.{tradition}", lang, labels, default=tradition_map.get(tradition, "Vedic Multi-Tradition Synthesis"))
         doc_title = resolve_translation("birthChart.pdf.report_title", lang, labels, default="Comprehensive Vedic Horoscope & 5 Traditions Dossier")
 
