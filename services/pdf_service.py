@@ -262,9 +262,76 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
         return resolve_translation(f"vedic.signs.{k}", lang, labels, default=str(val))
 
     def t_nakshatra(val: Any) -> str:
-        ck = _clean_key(val)
-        if not ck: return str(val or "")
-        return resolve_translation(f"vedic.nakshatras.{ck}", lang, labels, default=str(val))
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        lord_m = re.search(r'\(Lord:\s*([^)]+)\)', s, re.IGNORECASE)
+        nak_name = re.sub(r'\(.*?\)', '', s).strip()
+        ck = _clean_key(nak_name)
+        if not ck: return s
+        trans_nak = resolve_translation(f"vedic.nakshatras.{ck}", lang, labels, default=nak_name)
+        if lord_m:
+            lord_name = lord_m.group(1).strip()
+            lord_trans = t_planet(lord_name)
+            lord_label = resolve_translation("dailyInsights.pdf.lord", lang, labels, default="Lord")
+            if lang == "bn" and lord_label == "Lord": lord_label = "অধিপতি"
+            elif lang == "hi" and lord_label == "Lord": lord_label = "स्वामी"
+            elif lang == "ta" and lord_label == "Lord": lord_label = "அதிபதி"
+            elif lang == "fr" and lord_label == "Lord": lord_label = "Maître"
+            return f"{trans_nak} ({lord_label}: {lord_trans})"
+        return trans_nak
+
+    def clean_muhurta_time(val: Any) -> str:
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        clean = re.sub(r'\(.*?\)', '', s).strip()
+        return clean
+
+    def t_tithi(val: Any) -> str:
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        s_clean = re.sub(r'\(.*?\)', '', s).strip()
+        ck = s_clean.lower().replace(" ", "_").replace("-", "_")
+        trans = resolve_translation(f"vedic.tithis.{ck}", lang, labels, default="")
+        if trans: return trans
+        t_dict = resolve_translation("vedic.tithis", lang, labels, default={})
+        if isinstance(t_dict, dict):
+            for k, v in t_dict.items():
+                if k in ck or ck in k:
+                    return v
+        return s_clean
+
+    def t_yoga(val: Any) -> str:
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        s_clean = re.sub(r'\(.*?\)', '', s).strip()
+        ck = s_clean.lower().replace(" ", "_").replace("-", "_")
+        trans = resolve_translation(f"vedic.yogas.{ck}", lang, labels, default="")
+        if trans: return trans
+        y_dict = resolve_translation("vedic.yogas", lang, labels, default={})
+        if isinstance(y_dict, dict):
+            for k, v in y_dict.items():
+                if k in ck or ck in k:
+                    return v
+        return s_clean
+
+    def t_karana(val: Any) -> str:
+        s = str(val or "").strip()
+        if not s: return ""
+        import re
+        s_clean = re.sub(r'\(.*?\)', '', s).strip()
+        ck = s_clean.lower().replace(" ", "_").replace("-", "_")
+        trans = resolve_translation(f"vedic.karanas.{ck}", lang, labels, default="")
+        if trans: return trans
+        k_dict = resolve_translation("vedic.karanas", lang, labels, default={})
+        if isinstance(k_dict, dict):
+            for k, v in k_dict.items():
+                if k in ck or ck in k:
+                    return v
+        return s_clean
 
     def t_dignity(val: Any) -> str:
         ck = _clean_key(val)
@@ -477,25 +544,41 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
                 return plane_data["meaning"]
         return domain
 
-    def t_mulank_planet(val: Any) -> str:
+    def t_mulank_planet(val: Any, num_val: Any = None) -> str:
         s = str(val or "").strip()
-        num = "".join(c for c in s if c.isdigit())
+        num = "".join(c for c in str(num_val or "") if c.isdigit())
         if not num:
-            return t_planet(s)
-        if lang == "en":
-            p_map = {
-                "1": "Sun (Surya - The Sovereign & Creator)",
-                "2": "Moon (Chandra - The Nurturer & Intuitive)",
-                "3": "Jupiter (Guru - The Supreme Preceptor)",
-                "4": "Rahu (The Revolutionary Architect)",
-                "5": "Mercury (Budha - The Master Strategist)",
-                "6": "Venus (Shukra - The Cosmic Artist)",
-                "7": "Ketu (The Mystic Philosopher)",
-                "8": "Saturn (Shani - The Karmic Master & Judge)",
-                "9": "Mars (Mangal - The Divine Commander)"
-            }
-            return p_map.get(num, str(val))
-        return resolve_translation(f"numerology.meta.planets.{num}", lang, labels, default=str(val))
+            num = "".join(c for c in s if c.isdigit())
+        if not num:
+            s_lower = s.lower()
+            if "sun" in s_lower or "surya" in s_lower: num = "1"
+            elif "moon" in s_lower or "chandra" in s_lower: num = "2"
+            elif "jup" in s_lower or "guru" in s_lower: num = "3"
+            elif "rahu" in s_lower: num = "4"
+            elif "merc" in s_lower or "budh" in s_lower: num = "5"
+            elif "ven" in s_lower or "shukr" in s_lower: num = "6"
+            elif "ketu" in s_lower: num = "7"
+            elif "sat" in s_lower or "shan" in s_lower: num = "8"
+            elif "mar" in s_lower or "mang" in s_lower: num = "9"
+
+        if num and num in ["1", "2", "3", "4", "5", "6", "7", "8", "9"]:
+            if lang == "en":
+                p_map = {
+                    "1": "Sun (Surya - The Sovereign & Creator)",
+                    "2": "Moon (Chandra - The Nurturer & Intuitive)",
+                    "3": "Jupiter (Guru - The Supreme Preceptor)",
+                    "4": "Rahu (The Revolutionary Architect)",
+                    "5": "Mercury (Budha - The Master Strategist)",
+                    "6": "Venus (Shukra - The Cosmic Artist)",
+                    "7": "Ketu (The Mystic Philosopher)",
+                    "8": "Saturn (Shani - The Karmic Master & Judge)",
+                    "9": "Mars (Mangal - The Divine Commander)"
+                }
+                return p_map.get(num, str(val))
+            res = resolve_translation(f"numerology.meta.planets.{num}", lang, labels, default=None)
+            if res:
+                return res
+        return t_planet(s)
 
     def t_mission(val: Any) -> str:
         s = str(val or "").strip()
@@ -525,9 +608,45 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
         translated = []
         colors_dict = resolve_translation("numerology.meta.colors", lang, labels, default={})
         if not isinstance(colors_dict, dict): colors_dict = {}
+        alt_colors = resolve_translation("vedic.lucky_colors", lang, labels, default={})
+        if isinstance(alt_colors, dict):
+            colors_dict = {**alt_colors, **colors_dict}
+        comp_map = {
+            "bn": {
+                "bright_yellow": "উজ্জ্বল হলুদ", "bright yellow": "উজ্জ্বল হলুদ",
+                "deep_navy_blue": "গাঢ় নেভি ব্লু", "bleu_marine_profond": "গাঢ় নেভি ব্লু",
+                "navy_blue": "নেভি ব্লু", "navy": "নেভি ব্লু",
+                "light_green": "হালকা সবুজ", "royal_blue": "রাজকীয় নীল",
+                "ruby_red": "চুনি লাল", "pearl_white": "মুক্তার মতো সাদা"
+            },
+            "hi": {
+                "bright_yellow": "चमकीला पीला", "bright yellow": "चमकीला पीला",
+                "deep_navy_blue": "गहरा नेवी ब्लू", "bleu_marine_profond": "गहरा नेवी ब्लू",
+                "navy_blue": "नेवी ब्लू", "navy": "नेवी ब्लू",
+                "light_green": "हल्का हरा", "royal_blue": "रॉयल ब्लू",
+                "ruby_red": "माणिक्य लाल", "pearl_white": "मोती जैसा सफेद"
+            },
+            "ta": {
+                "bright_yellow": "பிரகாசமான மஞ்சள்", "bright yellow": "பிரகாசமான மஞ்சள்",
+                "deep_navy_blue": "அடர் நீலம்", "bleu_marine_profond": "அடர் நீலம்",
+                "navy_blue": "நேவி ப்ளூ", "navy": "நேவி ப்ளூ",
+                "light_green": "இளம்பச்சை", "royal_blue": "ராயல் ப்ளூ",
+                "ruby_red": "மாணிக்க சிவப்பு", "pearl_white": "முத்து வெள்ளை"
+            },
+            "fr": {
+                "bright_yellow": "Jaune éclatant", "bright yellow": "Jaune éclatant",
+                "deep_navy_blue": "Bleu marine profond", "bleu_marine_profond": "Bleu marine profond",
+                "navy_blue": "Bleu marine", "navy": "Bleu marine",
+                "light_green": "Vert clair", "royal_blue": "Bleu royal",
+                "ruby_red": "Rouge rubis", "pearl_white": "Blanc nacré"
+            }
+        }
         for p in parts:
             ck = p.lower().replace(" ", "_").replace("-", "_")
-            matched = colors_dict.get(ck)
+            c_lang_map = comp_map.get(lang, {})
+            matched = c_lang_map.get(ck) or c_lang_map.get(p.lower())
+            if not matched:
+                matched = colors_dict.get(ck)
             if not matched:
                 for k, v in colors_dict.items():
                     if k in ck or ck in k:
@@ -599,6 +718,10 @@ def render_pdf(template_name: str, lang: str, data: Dict[str, Any], labels: Opti
     context["t_planet"] = t_planet
     context["t_sign"] = t_sign
     context["t_nakshatra"] = t_nakshatra
+    context["clean_muhurta_time"] = clean_muhurta_time
+    context["t_tithi"] = t_tithi
+    context["t_yoga"] = t_yoga
+    context["t_karana"] = t_karana
     context["t_dignity"] = t_dignity
     context["t_koota"] = t_koota
     context["t_koota_area"] = t_koota_area

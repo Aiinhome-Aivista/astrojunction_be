@@ -438,16 +438,22 @@ Astrological facts for today:
 
     def _validate_language_script(text: str, lang: str) -> bool:
         if lang == "en":
+            # Must not contain Indic scripts (Hindi, Bengali, Tamil, etc.)
+            if bool(re.search(r'[\u0900-\u0DFF]', text)):
+                return False
             return True
         if lang == "hi":
-            return bool(re.search(r'[\u0900-\u097F]', text))
+            return bool(re.search(r'[\u0900-\u097F]', text)) and not bool(re.search(r'[\u0980-\u0DFF]', text))
         if lang == "bn":
-            return bool(re.search(r'[\u0980-\u09FF]', text))
+            return bool(re.search(r'[\u0980-\u09FF]', text)) and not bool(re.search(r'[\u0900-\u097F\u0A00-\u0DFF]', text))
         if lang == "ta":
-            return bool(re.search(r'[\u0B80-\u0BFF]', text))
+            return bool(re.search(r'[\u0B80-\u0BFF]', text)) and not bool(re.search(r'[\u0900-\u0B7F\u0C00-\u0DFF]', text))
         if lang == "fr":
+            # French MUST NOT contain any Indic scripts (Hindi, Bengali, Tamil, Telugu, etc. 0900-0DFF)
+            if bool(re.search(r'[\u0900-\u0DFF]', text)):
+                return False
             has_accents = bool(re.search(r'[éèêëàâîïôûùçÉÈÊËÀÂÎÏÔÛÙÇ]', text))
-            has_words = bool(re.search(r'\b(le|la|les|un|une|des|est|dans|pour|avec|vous|votre|aujourd|energie)\b', text, re.I))
+            has_words = bool(re.search(r'\b(le|la|les|un|une|des|est|dans|pour|avec|vous|votre|aujourd|energie|ce|cette|ces|qui|que)\b', text, re.I))
             return has_accents or has_words
         return True
 
@@ -483,7 +489,9 @@ Astrological facts for today:
 
         return True, cleaned
 
-    history = [{"role": "user", "content": "Generate today's daily insights as JSON."}]
+    lang_names = {"en": "English", "hi": "Hindi", "bn": "Bengali", "ta": "Tamil", "fr": "French"}
+    lang_name_full = lang_names.get(target_lang, "English")
+    history = [{"role": "user", "content": f"Generate today's daily insights strictly in {lang_name_full} as a valid JSON object. Every field must be completely written in {lang_name_full}."}]
     last_raw = ""
 
     for attempt in range(3):
@@ -498,12 +506,12 @@ Astrological facts for today:
             history.append({"role": "assistant", "content": raw_res})
             history.append({
                 "role": "user",
-                "content": f"Correction: Your previous response violated rules: {cleaned_or_err}. Regenerate the JSON strictly in {target_lang} with ABSOLUTELY ZERO numeric scores, NO percentages, and NO markdown."
+                "content": f"Correction: Your previous response violated rules: {cleaned_or_err}. Regenerate the JSON strictly in {lang_name_full} with ABSOLUTELY ZERO numeric scores, NO percentages, and NO markdown."
             })
         except Exception as e:
             print(f"[DailyHoroscope LLM] Execution error attempt {attempt + 1}: {e}")
 
-    # Fallback if target language generation fails after retries: return English version with showingEnglishNote
+    # Fallback if target language generation fails after retries: return clean English or localized fallback
     try:
         cleaned = last_raw.strip()
         if cleaned.startswith("```json"):
@@ -516,9 +524,9 @@ Astrological facts for today:
         for k in ["summary", "career", "love", "health"]:
             if k in parsed and isinstance(parsed[k], str):
                 parsed[k] = score_pattern.sub("", parsed[k]).strip()
-        if target_lang != "en" and not _validate_language_script(parsed.get("summary", ""), target_lang):
-            parsed["showingEnglishNote"] = True
-        return json.dumps(parsed, ensure_ascii=False)
+        # Strictly verify script before returning to avoid returning wrong script
+        if _validate_language_script(parsed.get("summary", ""), target_lang):
+            return json.dumps(parsed, ensure_ascii=False)
     except Exception:
         pass
 

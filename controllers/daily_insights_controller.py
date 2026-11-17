@@ -198,19 +198,38 @@ def generate_daily_insights_pdf():
         clean_name = "".join(c for c in p_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
         date_str = panchang.get("date") or profile.get("birthDate") or datetime.now().strftime("%Y-%m-%d")
 
-        # Fallback to server-side cache if frontend didn't supply aiInsights
+        # Fallback to server-side cache if frontend didn't supply aiInsights, or if wrong script detected
+        import re
+        if ai_insights and ai_insights.get("summary"):
+            if lang in ["fr", "en"] and re.search(r'[\u0900-\u0DFF]', ai_insights.get("summary", "")):
+                print(f"[Daily Insights PDF] Stale corrupted Indic text detected in {lang} AI insights. Evicting.")
+                ai_insights = {}
+
         if not ai_insights or not ai_insights.get("summary"):
             profile_id = str(profile.get("id") or profile.get("fullName") or profile.get("birthDate") or "anonymous").strip().lower()
             with _cache_lock:
                 for k, v in DAILY_HOROSCOPE_CACHE.items():
                     if k.startswith(f"{profile_id}_{date_str}") and k.endswith(f"_{lang}"):
-                        ai_insights = v.get("insights", v)
-                        break
-                if not ai_insights or not ai_insights.get("summary"):
-                    for k, v in DAILY_HOROSCOPE_CACHE.items():
-                        if k.startswith(f"{profile_id}_{date_str}"):
-                            ai_insights = v.get("insights", v)
+                        candidate = v.get("insights", v)
+                        if candidate and isinstance(candidate, dict):
+                            cand_summary = candidate.get("summary", "")
+                            if lang in ["fr", "en"] and re.search(r'[\u0900-\u0DFF]', cand_summary):
+                                continue
+                            ai_insights = candidate
                             break
+
+        # If still missing, attempt on-demand generation in target lang if panchang is present
+        chart_data = body.get("chartData") or {}
+        if not isinstance(chart_data, dict):
+            chart_data = {}
+        if (not ai_insights or not ai_insights.get("summary")) and panchang.get("tithi"):
+            try:
+                from services.llm_service import get_daily_insights_response
+                print(f"[Daily Insights PDF] On-demand generating daily insights in [{lang}] for PDF")
+                json_res = get_daily_insights_response(profile, chart_data, panchang, body.get("numerology") or {}, target_lang=lang)
+                ai_insights = json.loads(json_res)
+            except Exception as gen_err:
+                print(f"[Daily Insights PDF] On-demand AI generation fallback failed: {gen_err}")
 
         from services.pdf_service import resolve_translation
         doc_title = resolve_translation("dailyInsights.pdf.report_title", lang, labels, default="Daily Cosmic Insights & Vedic Panchang")

@@ -36,7 +36,7 @@
           {{ t('dailyInsights.pdf.lagna', 'LAGNA RASHI (ASCENDANT)') }}
         </div>
         <div style="font-size: 7.5pt; font-weight: 700; color: #1A1A1E;">
-          {{ chartData.ascendant.signName or 'Pisces' }} ({{ chartData.ascendant.signSanskrit or 'Meena' }})
+          {{ t_sign(chartData.ascendant.signName or 'Pisces') }}
         </div>
       </div>
 
@@ -46,7 +46,7 @@
           {{ t('dailyInsights.pdf.transit_moon', "TODAY'S TRANSIT MOON (GOCHARA CHANDRA)") }}
         </div>
         <div style="font-size: 7.5pt; font-weight: 700; color: #1A1A1E;">
-          {{ panchang.lunarSign or chartData.moonSign or 'Cancer' }}
+          {{ t_sign(panchang.lunarSign or chartData.moonSign or 'Cancer') }}
         </div>
       </div>
 
@@ -56,7 +56,7 @@
           {{ t('dailyInsights.pdf.mulank_psychic', 'MULANK (PSYCHIC ROOT)') }}
         </div>
         <div style="font-size: 7.5pt; font-weight: 700; color: #82410A;">
-          Mulank {{ d(numerology.mulank or 1) }} ({{ numerology.mulankPlanet or 'Sun' }})
+          {{ t('numerology.pdf.mulank_prefix', 'মূলাঙ্ক' if lang == 'bn' else 'मूलांक' if lang == 'hi' else 'மூலாங்க்' if lang == 'ta' else 'Mulank') }} {{ d(numerology.mulank or 1) }} ({{ t_mulank_planet(numerology.mulankPlanet, numerology.mulank) }})
         </div>
       </div>
 
@@ -66,7 +66,7 @@
           {{ t('dailyInsights.pdf.nakshatra_harmony', 'NAKSHATRA & HARMONY') }}
         </div>
         <div style="font-size: 7.5pt; font-weight: 700; color: #B58328;">
-          {{ panchang.nakshatra or 'Ashlesha' }} ({{ d(panchang.auspiciousScore or 75) }}%)
+          {{ t_nakshatra(panchang.nakshatra or 'Ashlesha') }} ({{ d(panchang.auspiciousScore or 75) }}%)
         </div>
       </div>
     </div>
@@ -84,7 +84,7 @@
       {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }}
     </div>
     <div style="font-size: 5.8pt; color: #5A5A5A;">
-      {{ t('dailyInsights.pdf.ruled_by', 'Ruled by') }} {{ aiInsights.luckyPlanet or 'Jupiter' }}
+      {{ t('dailyInsights.pdf.ruled_by', 'শাসক' if lang == 'bn' else 'स्वामी' if lang == 'hi' else 'அதிபதி' if lang == 'ta' else 'Gouverné par' if lang == 'fr' else 'Ruled by') }} {{ t_planet(aiInsights.luckyPlanet or 'Jupiter') }}
     </div>
   </div>
 
@@ -94,7 +94,7 @@
       {{ t('dailyInsights.pdf.lucky_color_tone', 'LUCKY COLOR & TONE') }}
     </div>
     <div style="font-size: 8pt; font-weight: 700; color: #1A1A1E; margin: 1pt 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-      {{ aiInsights.luckyColor or 'Bright Yellow' }}
+      {{ t_colors(aiInsights.luckyColor or 'Bright Yellow') }}
     </div>
     <div style="font-size: 5.8pt; color: #5A5A5A;">
       {{ t('dailyInsights.pdf.resonance', 'Resonance & Vitality') }}
@@ -107,10 +107,10 @@
       {{ t('dailyInsights.pdf.abhijit', 'SHUBH ABHIJIT MUHURTA') }}
     </div>
     <div style="font-size: 8pt; font-weight: 700; color: #1A1A1E; margin: 1pt 0;">
-      {{ d(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM') }}
+      {{ d(clean_muhurta_time(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM')) }}
     </div>
     <div style="font-size: 5.8pt; color: #2E7D32; font-weight: 600;">
-      {{ t('dailyInsights.pdf.victory_window', 'Victory Window') }}
+      {{ t('dailyInsights.pdf.victory_window', 'বিজয় উইন্ডো' if lang == 'bn' else 'विजय मुहूर्त' if lang == 'hi' else 'வெற்றி நேரம்' if lang == 'ta' else 'Créneau de victoire' if lang == 'fr' else 'Victory Window') }}
     </div>
   </div>
 
@@ -120,10 +120,10 @@
       {{ t('dailyInsights.pdf.rahu_avoid', 'RAHU KAAL (AVOID)') }}
     </div>
     <div style="font-size: 8pt; font-weight: 700; color: #C62828; margin: 1pt 0;">
-      {{ d(panchang.rahuKaal or '07:30 - 09:00 AM') }}
+      {{ d(clean_muhurta_time(panchang.rahuKaal or '07:30 - 09:00 AM')) }}
     </div>
     <div style="font-size: 5.8pt; color: #C62828;">
-      {{ t('dailyInsights.pdf.inauspicious_window', 'Inauspicious Window') }}
+      {{ t('dailyInsights.pdf.inauspicious_window', 'অশুভ উইন্ডো' if lang == 'bn' else 'अशुभ समय' if lang == 'hi' else 'அசுப நேரம்' if lang == 'ta' else 'Créneau inauspicieux' if lang == 'fr' else 'Inauspicious Window') }}
     </div>
   </div>
 </div>
@@ -186,7 +186,7 @@
       {{ t('dailyInsights.pdf.sadhana_title', 'RECOMMENDED DAILY VEDIC RITUALS (NITYA SADHANA)') }}
     </div>
     <div style="font-size: 6.2pt; font-style: italic; color: #A08246;">
-      {{ t('dailyInsights.pdf.prescribed_for', 'Prescribed for {{nakshatra}} Nakshatra Day', nakshatra=panchang.nakshatra or 'Vedic') }}
+      {{ t('dailyInsights.pdf.prescribed_for', 'Prescribed for {{nakshatra}} Nakshatra Day', nakshatra=t_nakshatra(panchang.nakshatra or 'Vedic')) }}
     </div>
   </div>
 
@@ -254,19 +254,19 @@
     <div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_tithi', 'Tithi (Lunar Day)') }}</span>
-        <strong style="color: #1A1A1E;">{{ panchang.tithi or 'Shukla Navami' }}</strong>
+        <strong style="color: #1A1A1E;">{{ t_tithi(panchang.tithi or 'Shukla Navami') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_nakshatra', 'Nakshatra (Asterism)') }}</span>
-        <strong style="color: #1A1A1E;">{{ panchang.nakshatra or 'Pushya' }}</strong>
+        <strong style="color: #1A1A1E;">{{ t_nakshatra(panchang.nakshatra or 'Pushya') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_yoga', 'Vedic Yoga') }}</span>
-        <strong style="color: #1A1A1E;">{{ panchang.yoga or 'Sadhya' }}</strong>
+        <strong style="color: #1A1A1E;">{{ t_yoga(panchang.yoga or 'Sadhya') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_karana', 'Karana (Half Tithi)') }}</span>
-        <strong style="color: #1A1A1E;">{{ panchang.karana or 'Bava' }}</strong>
+        <strong style="color: #1A1A1E;">{{ t_karana(panchang.karana or 'Bava') }}</strong>
       </div>
     </div>
 
@@ -274,11 +274,11 @@
     <div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_sunsign', 'Sun Sign (Surya Rashi)') }}</span>
-        <strong style="color: #1A1A1E;">{{ panchang.solarSign or chartData.sunSign or 'Leo' }}</strong>
+        <strong style="color: #1A1A1E;">{{ t_sign(panchang.solarSign or chartData.sunSign or 'Leo') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD; background: #FCFAF6;">
         <span style="color: #8C500A; font-weight: 700;">{{ t('dailyInsights.pdf.panchang_moonsign', "Today's Transit Moon") }}</span>
-        <strong style="color: #8C3C00;">{{ panchang.lunarSign or chartData.moonSign or 'Cancer' }}</strong>
+        <strong style="color: #8C3C00;">{{ t_sign(panchang.lunarSign or chartData.moonSign or 'Cancer') }}</strong>
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_sun_times', 'Sunrise / Sunset') }}</span>
@@ -286,7 +286,7 @@
       </div>
       <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
         <span style="color: #5F5A55;">{{ t('dailyInsights.pdf.panchang_brahma', 'Brahma Muhurta') }}</span>
-        <strong style="color: #1A1A1E;">{{ d(panchang.brahmaMuhurta or '04:36 - 05:24 AM') }}</strong>
+        <strong style="color: #1A1A1E;">{{ d(clean_muhurta_time(panchang.brahmaMuhurta or '04:36 - 05:24 AM')) }}</strong>
       </div>
     </div>
   </div>
@@ -319,9 +319,9 @@
       <tr style="background: #FAF6EF; font-weight: 700;">
         <td style="color: #8C500A; padding: 2.5pt 5pt;">{{ t('dailyInsights.pdf.ascendant_lagna', 'Ascendant (Lagna)') }}</td>
         <td style="color: #825514; padding: 2.5pt 5pt;">Lagna</td>
-        <td style="color: #8C3C00; padding: 2.5pt 5pt;">{{ chartData.ascendant.signName or 'Pisces' }}</td>
+        <td style="color: #8C3C00; padding: 2.5pt 5pt;">{{ t_sign(chartData.ascendant.signName or 'Pisces') }}</td>
         <td style="padding: 2.5pt 5pt;">{{ d(chartData.ascendant.degree or 9.85) }}&deg;</td>
-        <td style="padding: 2.5pt 5pt;">{{ chartData.ascendant.nakshatra or 'Uttara Bhadrapada' }} (P1)</td>
+        <td style="padding: 2.5pt 5pt;">{{ t_nakshatra(chartData.ascendant.nakshatra or 'Uttara Bhadrapada') }} (P1)</td>
         <td style="padding: 2.5pt 5pt;">H1</td>
       </tr>
 
@@ -372,7 +372,7 @@
         {{ t('dailyInsights.pdf.abhijit_label', 'ABHIJIT MUHURTA (VIJAY KAAL)') }}
       </div>
       <div style="font-size: 7.2pt; font-weight: 700; color: #1A1A1E;">
-        {{ d(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM') }}
+        {{ d(clean_muhurta_time(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM')) }}
       </div>
       <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
         {{ t('dailyInsights.pdf.abhijit_desc', 'Optimal window for vital negotiations, new initiatives & contracts.') }}
@@ -385,7 +385,7 @@
         {{ t('dailyInsights.pdf.brahma_label', 'BRAHMA MUHURTA (AMRIT KAAL)') }}
       </div>
       <div style="font-size: 7.2pt; font-weight: 700; color: #1A1A1E;">
-        {{ d(panchang.brahmaMuhurta or '04:36 - 05:24 AM') }}
+        {{ d(clean_muhurta_time(panchang.brahmaMuhurta or '04:36 - 05:24 AM')) }}
       </div>
       <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
         {{ t('dailyInsights.pdf.brahma_desc', 'Pre-dawn sattvic window ideal for meditation, pranayama & clarity.') }}
@@ -398,7 +398,7 @@
         {{ t('dailyInsights.pdf.rahu_label', 'RAHU KAAL (INAUSPICIOUS - AVOID)') }}
       </div>
       <div style="font-size: 7.2pt; font-weight: 700; color: #C62828;">
-        {{ d(panchang.rahuKaal or '07:30 - 09:00 AM') }}
+        {{ d(clean_muhurta_time(panchang.rahuKaal or '07:30 - 09:00 AM')) }}
       </div>
       <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
         {{ t('dailyInsights.pdf.rahu_desc', 'Avoid signing major legal contracts, journeys or new financial starts.') }}
@@ -421,7 +421,7 @@
         {{ t('dailyInsights.pdf.psychic_number', 'PSYCHIC NUMBER (MULANK)') }}
       </div>
       <div style="font-size: 7.2pt; font-weight: 700; color: #82410A;">
-        Mulank {{ d(numerology.mulank or 1) }} ({{ t('dailyInsights.pdf.ruled_by', 'Ruled by') }} {{ numerology.mulankPlanet or 'Sun' }})
+        {{ t('numerology.pdf.mulank_prefix', 'মূলাঙ্ক' if lang == 'bn' else 'मूलांक' if lang == 'hi' else 'மூலாங்க்' if lang == 'ta' else 'Mulank') }} {{ d(numerology.mulank or 1) }} ({{ t('dailyInsights.pdf.ruled_by', 'শাসক' if lang == 'bn' else 'स्वामी' if lang == 'hi' else 'அதிபதி' if lang == 'ta' else 'Gouverné par' if lang == 'fr' else 'Ruled by') }} {{ t_planet(numerology.mulankPlanet or 'Sun') }})
       </div>
     </div>
     <div style="font-size: 6.2pt; color: #323237; margin-bottom: 4pt;">
@@ -432,7 +432,7 @@
       {{ t('dailyInsights.pdf.transit_harmonizers', 'DAILY TRANSIT HARMONIZERS') }}
     </div>
     <div style="font-size: 6.2pt; color: #323237; line-height: 1.35; margin-bottom: 3pt;">
-      <div>&bull; {{ t('dailyInsights.pdf.lucky_number_today', 'Lucky Number Today') }}: {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }} ({{ aiInsights.luckyPlanet or 'Sun' }})</div>
+      <div>&bull; {{ t('dailyInsights.pdf.lucky_number_today', 'Lucky Number Today') }}: {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }} ({{ t_planet(aiInsights.luckyPlanet or 'Sun') }})</div>
       <div>&bull; {{ t('dailyInsights.pdf.lucky_color_today', 'Lucky Color & Tone', color=t_colors(aiInsights.luckyColor or 'Bright Yellow')) }}</div>
     </div>
 
