@@ -135,6 +135,11 @@ def calculate_ephemeris_panchang():
 def daily_horoscope():
     return daily_insights_controller.daily_horoscope()
 
+@app.route("/daily-insights/generate-pdf", methods=["POST"])
+@app.route("/api/daily-insights/generate-pdf", methods=["POST"])
+def generate_daily_insights_pdf():
+    return daily_insights_controller.generate_daily_insights_pdf()
+
 # ==========================================
 # BIRTH CHART AND TRADITIONS
 # ==========================================
@@ -142,6 +147,12 @@ def daily_horoscope():
 @app.route("/birth-chart/generate", methods=["POST"])
 def calculate_ephemeris_chart():
     return birth_chart_controller.calculate_ephemeris_chart()
+
+@app.route("/birth-chart/generate-pdf", methods=["POST"])
+@app.route("/api/birth-chart/generate-pdf", methods=["POST"])
+@app.route("/api/horoscope/generate-pdf", methods=["POST"])
+def generate_birth_chart_pdf():
+    return birth_chart_controller.generate_birth_chart_pdf()
 
 @app.route("/birth-chart/ai-interpretation", methods=["POST"])
 def post_interpret():
@@ -271,6 +282,11 @@ def post_numerology_insights():
 @app.route("/numerology/calculate", methods=["POST"])
 def calculate_numerology_route():
     return numerology_controller.calculate_numerology_endpoint()
+
+@app.route("/numerology/generate-pdf", methods=["POST"])
+@app.route("/api/numerology/generate-pdf", methods=["POST"])
+def generate_numerology_pdf():
+    return numerology_controller.generate_numerology_pdf()
 
 
 

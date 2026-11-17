@@ -96,13 +96,93 @@ def post_roadmap_insights():
 
 def download_roadmap_pdf():
     try:
+        from datetime import datetime
+        from services.pdf_service import render_pdf
         body = request.get_json(silent=True) or {}
+        lang = body.get("lang") or body.get("language") or "en"
         profile = body.get("profile", {})
         p_name = profile.get("fullName") or profile.get("name") or "Seeker"
         clean_name = "".join(c for c in p_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        selected_horizon = body.get("selectedHorizon") or body.get("horizon") or "0-5 Years"
+        clean_horizon = selected_horizon.replace(" ", "_")
+        milestones = body.get("roadmap") or body.get("milestones") or []
+        labels = body.get("labels") or {}
+        chart_data = body.get("chartData") or {}
+        numerology = body.get("numerology") or {}
 
-        pdf_bytes = generate_roadmap_report_pdf(body)
-        filename = f"Vedic_25Year_Roadmap_{clean_name}.pdf"
+        # Celestial coordinates
+        asc_sign = chart_data.get("ascendant", {}).get("signName") or chart_data.get("ascendant", {}).get("signSanskrit") or "Libra"
+        moon_planet = next((p for p in chart_data.get("planets", []) if isinstance(p, dict) and (p.get("id") == "moon" or (p.get("name") and p["name"].lower() == "moon"))), None)
+        moon_sign = chart_data.get("moonSign") or (moon_planet.get("signName") if moon_planet else "Gemini")
+        nakshatra = f"{moon_planet.get('nakshatra')} (Pada {moon_planet.get('pada', 1)})" if moon_planet and moon_planet.get("nakshatra") else "Mrigashira (Pada 4)"
+        active_dasha_obj = next((d for d in chart_data.get("dashaPeriods", []) if isinstance(d, dict) and d.get("isCurrent")), None)
+        active_dasha_text = f"{active_dasha_obj.get('planet', 'Vimshottari')} Mahadasha" if active_dasha_obj else "Active Vimshottari Mahadasha Cycle"
+
+        # Numerological coordinates
+        mulank = numerology.get("mulank") or 8
+        mulank_planet = numerology.get("mulankPlanet") or "Saturn"
+        bhagyank = numerology.get("bhagyank") or 2
+        bhagyank_planet = numerology.get("bhagyankPlanet") or "Moon"
+
+        # Normalise milestone fields for template
+        normalised_milestones = []
+        completed_count = 0
+        in_progress_count = 0
+        for m in milestones:
+            st = m.get("status") or "In-Progress"
+            if st == "Completed":
+                completed_count += 1
+            else:
+                in_progress_count += 1
+            normalised_milestones.append({
+                "year": m.get("year") or "2026",
+                "age": m.get("age") or "28",
+                "timeframe": m.get("timeframe") or selected_horizon,
+                "dasha": m.get("dasha") or m.get("dashaPeriod") or "Jupiter Mahadasha",
+                "transit": m.get("transit") or m.get("planetaryTrigger") or "Direct",
+                "domain": m.get("domain") or m.get("category") or "Career & Purpose",
+                "title": m.get("title") or m.get("theme") or "Major Planetary Realignment",
+                "guidance": m.get("guidance") or m.get("prediction") or m.get("description") or "",
+                "prediction": m.get("prediction") or m.get("guidance") or m.get("description") or "",
+                "upaya": m.get("upaya") or m.get("remedy") or m.get("remedialUpaya") or "Chant Surya Gayatri or offer water to the rising Sun daily.",
+                "score": m.get("score") or m.get("cosmicScore") or 85,
+                "status": st,
+            })
+
+        from services.pdf_service import resolve_translation
+        doc_title = resolve_translation("roadmap.pdf.report_title", lang, labels, default=f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})")
+        doc_subtitle = resolve_translation("roadmap.pdf.subtitle", lang, labels, default="Synthesized through Vimshottari Mahadasha/Antardasha cycles & planetary transits (2026 – 2051)")
+
+        data = {
+            "doc_type": "roadmap",
+            "doc_title": f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})" if lang == "en" else resolve_translation("roadmap.pdf.report_title", lang, labels, default=f"VEDIC DESTINY ROADMAP & LIFE BLUEPRINT ({selected_horizon.upper()})"),
+            "doc_subtitle": doc_subtitle,
+            "doc_subtitle_tagline": "Synthesized through Vimshottari Mahadasha/Antardasha cycles & planetary transits (2026 – 2051)",
+            "doc_date": profile.get("birthDate") or datetime.now().strftime("%Y-%m-%d"),
+            "profile": profile,
+            "selectedHorizon": selected_horizon,
+            "ascSign": asc_sign,
+            "moonSign": moon_sign,
+            "nakshatra": nakshatra,
+            "activeDashaText": active_dasha_text,
+            "mulank": mulank,
+            "mulankPlanet": mulank_planet,
+            "bhagyank": bhagyank,
+            "bhagyankPlanet": bhagyank_planet,
+            "completedCount": completed_count,
+            "inProgressCount": in_progress_count,
+            "milestones": normalised_milestones,
+            "strategicGuidance": body.get("strategicGuidance"),
+            "has_english_fallback": lang != "en" and body.get("isEnglishFallback", False),
+        }
+
+        try:
+            pdf_bytes = render_pdf("dossier_pdf.html", lang, data, labels)
+        except Exception as render_err:
+            print(f"HTML PDF render error ({render_err}), falling back to ReportLab engine.")
+            pdf_bytes = generate_roadmap_report_pdf(body)
+
+        filename = f"Vedic_25Year_Roadmap_{clean_name}_{clean_horizon}_{lang}.pdf"
 
         return Response(
             pdf_bytes,

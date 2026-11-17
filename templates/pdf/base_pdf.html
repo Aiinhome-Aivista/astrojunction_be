@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ doc_title or 'AstroJunction Report' }}</title>
+<style>
+{{ embedded_fonts_css | safe }}
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+*, *:before, *:after {
+  box-sizing: border-box;
+}
+
+{% if lang in ['hi', 'bn', 'ta'] %}
+*, *:before, *:after {
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}
+{% endif %}
+
+body {
+  margin: 0;
+  padding: 13mm 13mm 16mm 13mm;
+  color: #1E1B15;
+  background-color: #FFFFFF;
+  font-family: {{ font_family | safe }};
+  font-size: 8pt;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* Background watermark (Meditating Yogi / Cosmos matching Master English PDF) */
+.page-bg-watermark {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('data:image/jpeg;base64,{{ bg_base64 }}');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.07;
+  pointer-events: none;
+  z-index: -100;
+}
+
+/* Signature golden double border matching Master English PDF */
+.page-frame-outer {
+  position: fixed;
+  top: 8mm;
+  left: 8mm;
+  right: 8mm;
+  bottom: 8mm;
+  border: 1.1pt solid #C9A050;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.page-frame-inner {
+  position: fixed;
+  top: 10mm;
+  left: 10mm;
+  right: 10mm;
+  bottom: 10mm;
+  border: 0.35pt solid #C9A050;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* 4 Golden Corner Accents */
+.corner-dot {
+  position: fixed;
+  width: 2.4mm;
+  height: 2.4mm;
+  background-color: #C9A050;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10000;
+}
+.ctl { top: 9mm; left: 9mm; }
+.ctr { top: 9mm; right: 9mm; }
+.cbl { bottom: 9mm; left: 9mm; }
+.cbr { bottom: 9mm; right: 9mm; }
+
+/* Fixed Footer across all pages */
+.page-footer-fixed {
+  position: fixed;
+  bottom: 11.5mm;
+  left: 13mm;
+  right: 13mm;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 0.4pt solid #E2D3B0;
+  padding-top: 2.5pt;
+  font-size: 6.8pt;
+  color: #6E695F;
+  font-family: 'Nunito', sans-serif;
+  z-index: 9998;
+  white-space: nowrap;
+}
+
+/* Master Page 1 Header (Identical to Image 5 & Image 7) */
+.master-header {
+  display: flex;
+  align-items: center;
+  gap: 12pt;
+  margin-bottom: 9pt;
+  padding-left: 1mm;
+}
+
+.master-logo {
+  width: 38pt;
+  height: 38pt;
+  border-radius: 3pt;
+  flex-shrink: 0;
+}
+
+.master-title-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.master-brand-title {
+  font-size: 17pt;
+  font-weight: 700;
+  color: #141418;
+  line-height: 1.1;
+  font-family: 'Nunito', sans-serif;
+  letter-spacing: 0.2pt;
+  white-space: nowrap;
+}
+
+.master-brand-title span {
+  color: #B58328;
+}
+
+.master-report-title {
+  font-size: 8.5pt;
+  font-weight: 700;
+  color: #7E5F18;
+  margin-top: 1.5pt;
+  letter-spacing: 0.3pt;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.master-report-sub {
+  font-size: 7pt;
+  font-style: italic;
+  color: #6E695F;
+  margin-top: 1.5pt;
+  white-space: nowrap;
+}
+
+/* Master Client Particulars Card (2-column rounded box with middle divider) */
+.particulars-box {
+  background: #FFFFFF;
+  border: 0.4pt solid #E2D3B0;
+  border-radius: 4pt;
+  display: flex;
+  margin-bottom: 8pt;
+}
+
+.particulars-col-left {
+  flex: 1;
+  padding: 5.5pt 9pt;
+  border-right: 0.4pt solid #E2D3B0;
+}
+
+.particulars-col-right {
+  flex: 1;
+  padding: 5.5pt 9pt;
+}
+
+.box-label {
+  font-size: 7.5pt;
+  font-weight: 700;
+  color: #7E5F18;
+  text-transform: uppercase;
+  margin-bottom: 2pt;
+  white-space: nowrap;
+}
+
+.box-title {
+  font-size: 10pt;
+  font-weight: 700;
+  color: #1A1A1E;
+}
+
+.box-meta {
+  font-size: 7.2pt;
+  color: #505050;
+  margin-top: 1.5pt;
+}
+
+/* General Container Card with #C9A050 Border */
+.card-gold {
+  background: #FFFFFF;
+  border: 0.4pt solid #C9A050;
+  border-radius: 3.5pt;
+  padding: 6pt 9pt;
+  margin-bottom: 8pt;
+}
+
+.card-gold-title {
+  font-size: 8pt;
+  font-weight: 700;
+  color: #7E5F18;
+  text-transform: uppercase;
+  margin-bottom: 4pt;
+}
+
+/* Master Data Table */
+.master-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7.2pt;
+  margin-top: 2pt;
+}
+
+.master-table th {
+  background-color: #FAF6EF;
+  color: #7E5F18;
+  font-weight: 700;
+  padding: 3.5pt 4pt;
+  text-align: left;
+  border-bottom: 0.4pt solid #E2D3B0;
+  white-space: nowrap;
+}
+
+.master-table td {
+  padding: 3.5pt 4pt;
+  border-bottom: 0.2pt solid #EFEAE0;
+}
+
+.master-table tr:nth-child(even) td {
+  background-color: #FDFCF9;
+}
+
+/* Page 2 Header Bar */
+.page2-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 0.3pt solid #E2D3B0;
+  padding-top: 4mm;
+  padding-bottom: 3pt;
+  margin-bottom: 8pt;
+  font-size: 8pt;
+  font-weight: 700;
+  color: #7E5F18;
+  text-transform: uppercase;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.avoid-break {
+  page-break-inside: avoid;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 1pt 4.5pt;
+  border-radius: 2pt;
+  font-size: 6.5pt;
+  font-weight: 600;
+}
+.badge-gold { background: #FAF5EB; color: #B58328; border: 0.3pt solid #C9A050; }
+.badge-green { background: #ECFDF5; color: #059669; }
+.badge-red { background: #FEF2F2; color: #DC2626; }
+
+.fallback-notice {
+  background: #FFFBEB;
+  border: 0.6pt solid #F59E0B;
+  color: #B45309;
+  font-size: 7pt;
+  padding: 3pt 6pt;
+  border-radius: 2pt;
+  margin-bottom: 6pt;
+}
+</style>
+</head>
+<body>
+
+<div class="page-bg-watermark"></div>
+<div class="page-frame-outer"></div>
+<div class="page-frame-inner"></div>
+<div class="corner-dot ctl"></div>
+<div class="corner-dot ctr"></div>
+<div class="corner-dot cbl"></div>
+<div class="corner-dot cbr"></div>
+
+<div class="page-footer-fixed">
+  <span>Generated on: {{ d(doc_date_full or 'Mon, Nov 16, 2026, 07:44 PM') }}</span>
+  <span>AstroJunction &bull; {{ t('brand.name', 'AstroJunction') }}</span>
+</div>
+
+<!-- Master Page 1 Header -->
+<div class="master-header">
+  {% if logo_base64 %}
+  <img src="data:image/png;base64,{{ logo_base64 }}" class="master-logo" alt="Logo" />
+  {% endif %}
+  <div class="master-title-block">
+    <div class="master-brand-title">ASTRO<span>JUNCTION</span></div>
+    <div class="master-report-title">{{ doc_title }}</div>
+    <div class="master-report-sub">{{ doc_subtitle_tagline }}</div>
+  </div>
+</div>
+
+{% if has_english_fallback %}
+<div class="fallback-notice">
+  {{ english_notice }}
+</div>
+{% endif %}
+
+{% block content %}{% endblock %}
+
+</body>
+</html>

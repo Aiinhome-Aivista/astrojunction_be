@@ -1,0 +1,173 @@
+{% extends "base_pdf.html" %}
+
+{% block content %}
+<!-- Partners Comparison Box -->
+<div style="display: flex; gap: 8pt; margin-bottom: 8pt;">
+  <div class="card-gold" style="flex: 1; margin-bottom: 0; background: #FAF7F2; border-color: #DECDB0;">
+    <div class="box-label">{{ t('kundliMilan.pdf.partner1', 'PARTNER 1 (PERSON A / GROOM)') }}</div>
+    <div style="font-size: 11pt; font-weight: 700; color: #1E1B15; margin-bottom: 2pt;">
+      {{ partner1.fullName or 'Partner 1' }}
+    </div>
+    <div style="font-size: 7.8pt; color: #555044;">
+      <div>{{ t('birthChart.pdf.born', 'Born') }}: {{ d(partner1.birthDate) }} {% if partner1.birthTime %}at {{ d(partner1.birthTime) }}{% endif %}</div>
+      <div>{{ t_place(partner1.birthPlace) }}</div>
+      <div style="margin-top: 2pt;">
+        <strong>{{ t('kundliMilan.rashi_label', 'Rashi') }}:</strong> {{ t_sign(partner1.rashi) }} &bull; 
+        <strong>{{ t('birthChart.pdf.nakshatra', 'Nakshatra') }}:</strong> {{ t_nakshatra(partner1.nakshatra) }}
+      </div>
+      <div style="margin-top: 1.5pt;">
+        <strong>{{ t('kundliMilan.manglik_tile', 'Manglik') }}:</strong>
+        {% if partner1.isManglik %}
+          <span class="badge badge-red">{{ t('kundliMilan.status.active_manglik', 'Manglik') }}</span>
+        {% else %}
+          <span class="badge badge-green">{{ t('kundliMilan.status.non_manglik', 'Non-Manglik') }}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card-gold" style="flex: 1; margin-bottom: 0; background: #FAF7F2; border-color: #DECDB0;">
+    <div class="box-label">{{ t('kundliMilan.pdf.partner2', 'PARTNER 2 (PERSON B / BRIDE)') }}</div>
+    <div style="font-size: 11pt; font-weight: 700; color: #1E1B15; margin-bottom: 2pt;">
+      {{ partner2.fullName or 'Partner 2' }}
+    </div>
+    <div style="font-size: 7.8pt; color: #555044;">
+      <div>{{ t('birthChart.pdf.born', 'Born') }}: {{ d(partner2.birthDate) }} {% if partner2.birthTime %}at {{ d(partner2.birthTime) }}{% endif %}</div>
+      <div>{{ t_place(partner2.birthPlace) }}</div>
+      <div style="margin-top: 2pt;">
+        <strong>{{ t('kundliMilan.rashi_label', 'Rashi') }}:</strong> {{ t_sign(partner2.rashi) }} &bull; 
+        <strong>{{ t('birthChart.pdf.nakshatra', 'Nakshatra') }}:</strong> {{ t_nakshatra(partner2.nakshatra) }}
+      </div>
+      <div style="margin-top: 1.5pt;">
+        <strong>{{ t('kundliMilan.manglik_tile', 'Manglik') }}:</strong>
+        {% if partner2.isManglik %}
+          <span class="badge badge-red">{{ t('kundliMilan.status.active_manglik', 'Manglik') }}</span>
+        {% else %}
+          <span class="badge badge-green">{{ t('kundliMilan.status.non_manglik', 'Non-Manglik') }}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Score Highlight Card -->
+<div class="card-gold avoid-break" style="background: #FDF9EE; border-color: #C9A050; padding: 6.5pt 10pt; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8pt;">
+  <div>
+    <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #8C6D23;">
+      {{ t('kundliMilan.pdf.score_title', 'ASHTA KOOTA MILAN SCORE & COMPATIBILITY VERDICT') }}
+    </div>
+    <div style="font-size: 9.5pt; font-weight: 600; color: #1E1B15; margin-top: 2pt;">
+      {{ matchResult.recommendation or t('kundliMilan.verdicts.uttam', 'Uttam Milan — Auspicious Astrological Union') }}
+    </div>
+    <div style="font-size: 7.2pt; color: #787266; margin-top: 1pt;">
+      {{ t('kundliMilan.pdf.traditional_rule', 'Traditional Vedic threshold: 18+ points denotes marital suitability.') }}
+    </div>
+  </div>
+  <div style="text-align: right;">
+    <div style="font-size: 18pt; font-weight: 700; color: #7E5F18; line-height: 1;">
+      {{ d(matchResult.totalScore or 28) }}<span style="font-size: 11pt; color: #8C8270;">/{{ d(36) }}</span>
+    </div>
+    <div style="font-size: 8pt; font-weight: 600; color: #8C6D23; margin-top: 2pt;">
+      {{ d(matchResult.scorePercentage or 78) }}% {{ t('kundliMilan.pdf.vedic_harmony', 'Vedic Harmony') }}
+    </div>
+  </div>
+</div>
+
+<!-- Section 1: Ashta Koota 36 Gunas Table -->
+<div class="card-gold avoid-break" style="padding: 6pt 8pt; margin-bottom: 0;">
+  <div class="card-gold-title" style="margin-bottom: 3pt;">
+    {{ t('kundliMilan.pdf.ashta_koota', 'Ashta Koota Guna Milan Breakdown (8 Pillars of Marriage)') }}
+  </div>
+
+  <table class="master-table">
+    <thead>
+      <tr>
+        <th style="width: 14%;">{{ t('kundliMilan.pdf.col_koota', 'Koota') }}</th>
+        <th style="width: 25%;">{{ t('kundliMilan.pdf.col_domain', 'Spiritual Domain') }}</th>
+        <th style="width: 18%;">{{ partner1.fullName or t('kundliMilan.pdf.col_p1', 'Partner 1') }}</th>
+        <th style="width: 18%;">{{ partner2.fullName or t('kundliMilan.pdf.col_p2', 'Partner 2') }}</th>
+        <th style="width: 7%; text-align: center;">{{ t('kundliMilan.pdf.col_max', 'Max') }}</th>
+        <th style="width: 7%; text-align: center;">{{ t('kundliMilan.pdf.col_scored', 'Score') }}</th>
+        <th style="width: 11%; text-align: center;">{{ t('kundliMilan.pdf.col_assessment', 'Assessment') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for k in matchResult.kootas %}
+      <tr>
+        <td><strong>{{ t_koota(k.id or k.name) }}</strong></td>
+        <td>{{ t_koota_area(k.id or k.name, k.domain) }}</td>
+        <td>{{ t_koota_value(k.p1Attribute) }}</td>
+        <td>{{ t_koota_value(k.p2Attribute) }}</td>
+        <td style="text-align: center;">{{ d(k.maxScore) }}</td>
+        <td style="text-align: center;"><strong>{{ d(k.obtainedScore) }}</strong></td>
+        <td style="text-align: center;">
+          {% if k.obtainedScore == k.maxScore %}
+            <span class="badge badge-green">{{ t('kundliMilan.pdf.verdict_full', 'Full Resonance') }}</span>
+          {% elif k.obtainedScore > 0 %}
+            <span class="badge badge-gold">{{ t('kundliMilan.pdf.verdict_partial', 'Partial') }}</span>
+          {% else %}
+            <span class="badge badge-red">{{ t('kundliMilan.pdf.verdict_dosha', 'Affliction') }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- PAGE 2: Manglik, Nadi, Bhakoot & Synastry / AI Synthesis -->
+<div class="page-break"></div>
+
+<div class="page2-header-bar">
+  <span>ASTROJUNCTION &bull; {{ doc_title }}</span>
+</div>
+
+<div style="display: flex; gap: 8pt; margin-bottom: 8pt;" class="avoid-break">
+  <!-- Manglik Box -->
+  <div class="card-gold" style="flex: 1; margin-bottom: 0;">
+    <div class="card-gold-title">
+      {{ t('kundliMilan.pdf.manglik_title', 'Manglik (Kuja) Dosha Balance') }}
+    </div>
+    <div style="font-size: 7.5pt; color: #3C3831; line-height: 1.45;">
+      {{ matchResult.manglikAnalysis or t('kundliMilan.doshas.manglik_assessment', 'Kuja Dosha intensity is balanced between both horoscopes, ensuring domestic equilibrium and enduring marital vitality.') }}
+    </div>
+  </div>
+
+  <!-- Nadi & Bhakoot Box -->
+  <div class="card-gold" style="flex: 1; margin-bottom: 0;">
+    <div class="card-gold-title">
+      {{ t('kundliMilan.pdf.nadi_title', 'Nadi & Bhakoot Disposition') }}
+    </div>
+    <div style="font-size: 7.5pt; color: #3C3831; line-height: 1.45;">
+      {{ matchResult.nadiBhakootAnalysis or t('kundliMilan.doshas.nadi_safe', 'Both horoscopes indicate genetically and psychologically harmonious lunar placement. No critical Nadi Mahadosha identified.') }}
+    </div>
+  </div>
+</div>
+
+<!-- Western Synastry & Elemental Harmony -->
+<div class="card-gold avoid-break" style="margin-bottom: 8pt;">
+  <div class="card-gold-title">
+    {{ t('kundliMilan.tab_synastry', 'Cross-Tradition Synastry & Elemental Alignment') }}
+  </div>
+  <div style="display: flex; gap: 8pt; font-size: 7.5pt;">
+    <div style="flex: 1; padding: 4pt 6pt; background: #FDFCF9; border: 0.3pt solid #E2D3B0; border-radius: 3pt;">
+      <strong style="color: #7E5F18;">{{ t('kundliMilan.synastry.title_sun_moon', 'Sun-Moon Core Synergy') }}:</strong>
+      <div style="color: #4B463E; margin-top: 1.5pt; line-height: 1.4;">{{ matchResult.synastrySummary or t('kundliMilan.synastry.verdict_flowing_harmony', 'Harmonious trine disposition generating enduring mutual respect, shared purpose, and creative cooperation.') }}</div>
+    </div>
+    <div style="flex: 1; padding: 4pt 6pt; background: #FDFCF9; border: 0.3pt solid #E2D3B0; border-radius: 3pt;">
+      <strong style="color: #7E5F18;">{{ t('kundliMilan.synastry.elemental_synergy', 'Elemental Balance') }}:</strong>
+      <div style="color: #4B463E; margin-top: 1.5pt; line-height: 1.4;">{{ matchResult.elementalHarmony or t('kundliMilan.synastry.verdict_practical', 'Water & Earth element synergy providing emotional depth grounded in practical domestic stability.') }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Daivajna AI Deep Relationship Synthesis -->
+<div class="card-gold avoid-break" style="margin-bottom: 0;">
+  <div class="card-gold-title">
+    {{ t('kundliMilan.pdf.daivajna_title', 'Daivajna Deep Relationship Synthesis & Marital Counsel') }}
+  </div>
+  <div style="font-size: 7.5pt; line-height: 1.5; color: #2B2823;">
+    {{ matchResult.daivajnaSynthesis or t('kundliMilan.counsel.empty_desc', 'This sacred union reflects strong karmic alignment with mutually supportive planetary configurations. Cultivate patience, transparent communication during Saturnian transits, and celebrate spiritual milestones together.') }}
+  </div>
+</div>
+{% endblock %}

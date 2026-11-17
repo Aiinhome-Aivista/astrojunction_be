@@ -384,10 +384,10 @@ def get_daily_insights_response(
 
     lang_directives = {
         "en": "Write natively in dignified, natural, formal-polite scholarly English.",
-        "hi": "Write purely and natively in formal-polite Hindi using Devanagari script (हिंदी लिपि). Do NOT use English words or transliteration. Use authentic Vedic/Jyotish terms. Use Latin digits (1, 2, 3...) for numbers or times.",
-        "bn": "Write purely and natively in formal-polite standard Bengali using Bengali script (বাংলা লিপি). Do NOT use English words or transliteration. Use authentic Vedic/Jyotish terms. Use Latin digits (1, 2, 3...) for numbers or times.",
-        "ta": "Write purely and natively in formal-polite standard Tamil using Tamil script (தமிழ் எழுத்துரு). Do NOT use English words or transliteration. Use authentic Vedic/Jyotish terms. Use Latin digits (1, 2, 3...) for numbers or times.",
-        "fr": "Write purely and natively in elegant, formal French with correct accents (é, è, ê, à, ç, etc.). Use Latin digits (1, 2, 3...) for numbers or times."
+        "hi": "Write purely and natively in formal-polite Hindi using Devanagari script (हिंदी लिपि). Do NOT use English words (like 'Lagna', 'Libra', 'Prana' in Roman script) or transliteration; use authentic Vedic terms like 'लग्न', 'तुला', 'प्राण'. Use Latin digits (1, 2, 3...) for numbers or times.",
+        "bn": "Write purely and natively in formal-polite standard Bengali using Bengali script (বাংলা লিপি). Do NOT transliterate English zodiac names (do NOT write 'লিব্রা', write 'তুলা'; do NOT write 'সাইডেরিয়াল', write 'নিরায়ণ'). Use authentic Vedic terms. Use Latin digits (1, 2, 3...) for numbers or times.",
+        "ta": "Write purely and natively in formal-polite standard Tamil using Tamil script (தமிழ் எழுத்துரு). Do NOT use English words. Do NOT loop, repeat phrases, or invent unrelated festivals. Use authentic Jyotish terms. Use Latin digits (1, 2, 3...) for numbers or times.",
+        "fr": "Write purely and natively in elegant, formal French with correct accents (é, è, ê, à, ç, etc.). Translate zodiac signs into French (e.g. Balance, Scorpion, Sagittaire, Capricorne). Do NOT output Tamil, Hindi, or Bengali script in any French response. Use Latin digits (1, 2, 3...) for numbers or times."
     }
 
     directive = lang_directives.get(target_lang, lang_directives["en"])
@@ -406,6 +406,7 @@ STRICT EDITORIAL AND ACCURACY RULES:
 2. ASCENDANT DISTINCTION: The user's natal birth ascendant is their Janma Lagna ({natal_lagna}). Today's rising sign at dawn ({sunrise_asc}) MUST be referred to as "the sunrise ascendant (Gochara Lagna at sunrise)". NEVER refer to it simply as "Lagna today" or "today's Lagna".
 3. LANGUAGE & SCRIPT: {directive}
 4. FORMAT: Keep all text plain text with NO markdown bolding (**), asterisks, hashes, or bullet points. Use Latin digits (0-9) for any times or numbers.
+5. NO REPETITION / NO UNRELATED FESTIVALS: Do NOT loop or repeat phrases or sentences. Do NOT invent festivals (such as Diwali or Navratri) unless it matches today's stated Tithi. Ensure each field contains distinct, thoughtful, professional Vedic guidance.
 
 Astrological facts for today:
 - Janma Lagna (Natal Ascendant): {natal_lagna}

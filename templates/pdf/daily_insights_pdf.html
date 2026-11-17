@@ -1,0 +1,459 @@
+{% extends "base_pdf.html" %}
+
+{% block content %}
+<!-- ==========================================
+     PAGE 1: EXECUTIVE DAILY TRANSIT & SYNTHESIS
+     ========================================== -->
+
+<!-- 1. Client & Celestial Alignment Particulars (Highlighted Core Astrological Identity) -->
+<div style="background: #FFFFFF; border: 0.8pt solid #E2D3B0; border-radius: 4pt; padding: 7pt 10pt; margin-bottom: 8pt; display: flex; gap: 10pt;">
+  <!-- Left Column: Client Details -->
+  <div style="flex: 1; border-right: 0.6pt solid #EADCC0; padding-right: 8pt;">
+    <div style="font-size: 6.8pt; font-weight: 700; text-transform: uppercase; color: #7E5F18; letter-spacing: 0.5pt; margin-bottom: 2pt;">
+      {{ t('dailyInsights.pdf.client_particulars', 'CLIENT & NATAL PARTICULARS') }}
+    </div>
+    <div style="font-size: 10.5pt; font-weight: 700; color: #1A1A1E; margin-bottom: 2pt;">
+      {{ profile.fullName or 'Vedic Seeker' }}
+    </div>
+    <div style="font-size: 7.2pt; color: #505050; line-height: 1.4;">
+      <div><strong>{{ t('birthChart.pdf.born', 'Born') }}:</strong> {{ d(profile.birthDate or 'N/A') }}{% if profile.birthTime %} at {{ d(profile.birthTime) }}{% endif %} | {{ profile.birthPlace or 'Global' }}</div>
+      <div><strong>{{ t('dailyInsights.pdf.coordinates', 'Coords') }}:</strong> {{ d(profile.latitude or 28.61) }}&deg;N, {{ d(profile.longitude or 77.20) }}&deg;E</div>
+    </div>
+    <div style="font-size: 6.5pt; font-style: italic; color: #826E4B; margin-top: 3pt;">
+      {{ t('dailyInsights.pdf.destiny_name', 'Destiny Number (Bhagyank): {{bhagyank}} | Name Number (Namank): {{namank}}', bhagyank=d(numerology.bhagyank or 1), namank=d(numerology.namankChaldean or numerology.namankPythagorean or 1)) }}
+    </div>
+  </div>
+
+  <!-- Right Column: 4 Golden Highlight Badge Pills (2x2 Grid) -->
+  <div style="flex: 1; padding-left: 2pt;">
+    <div style="font-size: 6.8pt; font-weight: 700; text-transform: uppercase; color: #7E5F18; letter-spacing: 0.5pt; margin-bottom: 4pt;">
+      {{ t('dailyInsights.pdf.celestial_identity', 'CORE CELESTIAL IDENTITY & HARMONIC VIBRATION') }}
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4pt;">
+      <!-- Pill 1: Lagna Rashi -->
+      <div style="background: #FFFFFF; border: 0.6pt solid #C9A050; border-radius: 3pt; padding: 3pt 5pt;">
+        <div style="font-size: 5.5pt; font-weight: 700; color: #8C5F14; text-transform: uppercase;">
+          {{ t('dailyInsights.pdf.lagna', 'LAGNA RASHI (ASCENDANT)') }}
+        </div>
+        <div style="font-size: 7.5pt; font-weight: 700; color: #1A1A1E;">
+          {{ chartData.ascendant.signName or 'Pisces' }} ({{ chartData.ascendant.signSanskrit or 'Meena' }})
+        </div>
+      </div>
+
+      <!-- Pill 2: Transit Moon -->
+      <div style="background: #FFFFFF; border: 0.6pt solid #C9A050; border-radius: 3pt; padding: 3pt 5pt;">
+        <div style="font-size: 5.2pt; font-weight: 700; color: #8C5F14; text-transform: uppercase;">
+          {{ t('dailyInsights.pdf.transit_moon', "TODAY'S TRANSIT MOON (GOCHARA CHANDRA)") }}
+        </div>
+        <div style="font-size: 7.5pt; font-weight: 700; color: #1A1A1E;">
+          {{ panchang.lunarSign or chartData.moonSign or 'Cancer' }}
+        </div>
+      </div>
+
+      <!-- Pill 3: Mulank -->
+      <div style="background: #FFFFFF; border: 0.6pt solid #BE8728; border-radius: 3pt; padding: 3pt 5pt;">
+        <div style="font-size: 5.5pt; font-weight: 700; color: #96500A; text-transform: uppercase;">
+          {{ t('dailyInsights.pdf.mulank_psychic', 'MULANK (PSYCHIC ROOT)') }}
+        </div>
+        <div style="font-size: 7.5pt; font-weight: 700; color: #82410A;">
+          Mulank {{ d(numerology.mulank or 1) }} ({{ numerology.mulankPlanet or 'Sun' }})
+        </div>
+      </div>
+
+      <!-- Pill 4: Nakshatra & Harmony -->
+      <div style="background: #FFFFFF; border: 0.6pt solid #C9A050; border-radius: 3pt; padding: 3pt 5pt;">
+        <div style="font-size: 5.5pt; font-weight: 700; color: #8C5F14; text-transform: uppercase;">
+          {{ t('dailyInsights.pdf.nakshatra_harmony', 'NAKSHATRA & HARMONY') }}
+        </div>
+        <div style="font-size: 7.5pt; font-weight: 700; color: #B58328;">
+          {{ panchang.nakshatra or 'Ashlesha' }} ({{ d(panchang.auspiciousScore or 75) }}%)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2. Auspicious Transit Strip (4 Distinct Cards) -->
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5pt; margin-bottom: 8pt;">
+  <!-- Lucky Number -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 6pt;">
+    <div style="font-size: 6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.lucky_number', 'LUCKY NUMBER') }}
+    </div>
+    <div style="font-size: 9pt; font-weight: 700; color: #1A1A1E; margin: 1pt 0;">
+      {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }}
+    </div>
+    <div style="font-size: 5.8pt; color: #5A5A5A;">
+      {{ t('dailyInsights.pdf.ruled_by', 'Ruled by') }} {{ aiInsights.luckyPlanet or 'Jupiter' }}
+    </div>
+  </div>
+
+  <!-- Lucky Color -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 6pt;">
+    <div style="font-size: 6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.lucky_color_tone', 'LUCKY COLOR & TONE') }}
+    </div>
+    <div style="font-size: 8pt; font-weight: 700; color: #1A1A1E; margin: 1pt 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      {{ aiInsights.luckyColor or 'Bright Yellow' }}
+    </div>
+    <div style="font-size: 5.8pt; color: #5A5A5A;">
+      {{ t('dailyInsights.pdf.resonance', 'Resonance & Vitality') }}
+    </div>
+  </div>
+
+  <!-- Abhijit Muhurta -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 6pt;">
+    <div style="font-size: 6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.abhijit', 'SHUBH ABHIJIT MUHURTA') }}
+    </div>
+    <div style="font-size: 8pt; font-weight: 700; color: #1A1A1E; margin: 1pt 0;">
+      {{ d(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM') }}
+    </div>
+    <div style="font-size: 5.8pt; color: #2E7D32; font-weight: 600;">
+      {{ t('dailyInsights.pdf.victory_window', 'Victory Window') }}
+    </div>
+  </div>
+
+  <!-- Rahu Kaal -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 6pt;">
+    <div style="font-size: 6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.rahu_avoid', 'RAHU KAAL (AVOID)') }}
+    </div>
+    <div style="font-size: 8pt; font-weight: 700; color: #C62828; margin: 1pt 0;">
+      {{ d(panchang.rahuKaal or '07:30 - 09:00 AM') }}
+    </div>
+    <div style="font-size: 5.8pt; color: #C62828;">
+      {{ t('dailyInsights.pdf.inauspicious_window', 'Inauspicious Window') }}
+    </div>
+  </div>
+</div>
+
+<!-- 3. Daily AI Planetary Synthesis Card -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt; margin-bottom: 8pt;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3pt;">
+    <div style="font-size: 7.6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.daily_synthesis', 'DAILY PLANETARY SYNTHESIS & CELESTIAL RHYTHM') }}
+    </div>
+    <div style="font-size: 6.2pt; font-style: italic; color: #A08246;">
+      {{ t('dailyInsights.pdf.lahiri_ephemeris', 'Lahiri Ephemeris & Vedic Model') }}
+    </div>
+  </div>
+  <div style="font-size: 7.2pt; line-height: 1.5; color: #2D2D32;">
+    {{ aiInsights.summary or t('dailyInsights.pdf.not_available', 'Daily transit interpretation is currently unavailable.') }}
+  </div>
+</div>
+
+<!-- 4. 3 Core Life Domain Cards (Career, Love, Health) -->
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5pt; margin-bottom: 8pt;">
+  <!-- Career -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 5pt 7pt;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3pt;">
+      <span style="font-size: 6.8pt; font-weight: 700; color: #7E5F18;">{{ t('dailyInsights.pdf.career_commerce', 'CAREER & COMMERCE') }}</span>
+      <span style="font-size: 5.5pt; font-style: italic; color: #96783C;">{{ t('dailyInsights.pdf.strategy_wealth', '[ Strategy & Wealth ]') }}</span>
+    </div>
+    <div style="font-size: 6.5pt; line-height: 1.45; color: #37373C;">
+      {{ aiInsights.career or t('dailyInsights.pdf.not_available', 'Daily transit interpretation is currently unavailable.') }}
+    </div>
+  </div>
+
+  <!-- Love -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 5pt 7pt;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3pt;">
+      <span style="font-size: 6.8pt; font-weight: 700; color: #7E5F18;">{{ t('dailyInsights.pdf.love_harmony', 'LOVE & HARMONY') }}</span>
+      <span style="font-size: 5.5pt; font-style: italic; color: #96783C;">{{ t('dailyInsights.pdf.companionship', '[ Companionship ]') }}</span>
+    </div>
+    <div style="font-size: 6.5pt; line-height: 1.45; color: #37373C;">
+      {{ aiInsights.love or t('dailyInsights.pdf.not_available', 'Daily transit interpretation is currently unavailable.') }}
+    </div>
+  </div>
+
+  <!-- Health -->
+  <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 5pt 7pt;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3pt;">
+      <span style="font-size: 6.8pt; font-weight: 700; color: #7E5F18;">{{ t('dailyInsights.pdf.health_prana', 'HEALTH & PRANA') }}</span>
+      <span style="font-size: 5.5pt; font-style: italic; color: #96783C;">{{ t('dailyInsights.pdf.vitality_balance', '[ Vitality & Balance ]') }}</span>
+    </div>
+    <div style="font-size: 6.5pt; line-height: 1.45; color: #37373C;">
+      {{ aiInsights.health or t('dailyInsights.pdf.not_available', 'Daily transit interpretation is currently unavailable.') }}
+    </div>
+  </div>
+</div>
+
+<!-- 5. Recommended Daily Vedic Sadhana & Upaya (Morning & Evening) -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt; margin-bottom: 8pt;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4pt;">
+    <div style="font-size: 7.6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.sadhana_title', 'RECOMMENDED DAILY VEDIC RITUALS (NITYA SADHANA)') }}
+    </div>
+    <div style="font-size: 6.2pt; font-style: italic; color: #A08246;">
+      {{ t('dailyInsights.pdf.prescribed_for', 'Prescribed for {{nakshatra}} Nakshatra Day', nakshatra=panchang.nakshatra or 'Vedic') }}
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8pt;">
+    <!-- Morning Sadhana -->
+    <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 7pt;">
+      <div style="font-size: 6.5pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+        {{ t('dailyInsights.pdf.morning_sadhana', 'MORNING SADHANA (PRABHAT KRIYA)') }}
+      </div>
+      <div style="font-size: 7pt; font-weight: 700; color: #1A1A1E; margin-bottom: 1pt;">
+        {{ rituals.morningTitle or 'Surya Arghya & Gayatri Meditative Invocation' }}
+      </div>
+      <div style="font-size: 6.2pt; line-height: 1.4; color: #46464B;">
+        {{ rituals.morningDesc or 'Offer clean water to the rising Sun in a copper vessel with sacred Gayatri vibration. Focus prana on third eye.' }}
+      </div>
+    </div>
+
+    <!-- Evening Sadhana -->
+    <div style="background: #FFFFFF; border: 0.6pt solid #E2D3B0; border-radius: 3pt; padding: 4pt 7pt;">
+      <div style="font-size: 6.5pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+        {{ t('dailyInsights.pdf.evening_sadhana', 'EVENING SADHANA (SANDHYA KRIYA)') }}
+      </div>
+      <div style="font-size: 7pt; font-weight: 700; color: #1A1A1E; margin-bottom: 1pt;">
+        {{ rituals.eveningTitle or 'Deepa Daan & Peace Mantra Reflection' }}
+      </div>
+      <div style="font-size: 6.2pt; line-height: 1.4; color: #46464B;">
+        {{ rituals.eveningDesc or 'Light a ghee lamp in the northeast quadrant during twilight. Chant Om Namah Shivaya 108 times for emotional equilibrium.' }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 6. Daily Sankalpa & Blessing Affirmation Box -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt;">
+  <div style="font-size: 6.8pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+    {{ t('dailyInsights.pdf.sankalpa', 'DAILY VEDIC SANKALPA & HARMONY AFFIRMATION') }}
+  </div>
+  <div style="font-size: 6.5pt; font-style: italic; color: #322D28; line-height: 1.45;">
+    &ldquo;Om Shanti Shanti Shanti &mdash; I consciously align my inner thoughts and outer deeds with universal dharma (Rta). Today brings purposeful focus, auspicious clarity, and divine protection to my journey.&rdquo;
+  </div>
+</div>
+
+<!-- ==========================================
+     PAGE 2: SACRED PANCHANG, PLANETARY TABLE & REMEDIES
+     ========================================== -->
+<div class="page-break"></div>
+
+<div class="page2-header-bar">
+  <span>ASTROJUNCTION &bull; {{ t('dailyInsights.pdf.page2_header', 'DAILY VEDIC PANCHANG & PLANETARY TRANSITS') }}</span>
+</div>
+
+<!-- 1. Sacred Panchang Parameters Table (8 attributes in 2x4 grid) -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt; margin-bottom: 8pt;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4pt;">
+    <div style="font-size: 7.6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.panchang_title', 'SACRED PANCHANG PARAMETERS (SIDEREAL VEDIC EPHEMERIS)') }}
+    </div>
+    <div style="font-size: 6.2pt; font-style: italic; color: #A08246;">
+      {{ t('dailyInsights.pdf.panchang_coords', 'Computed for Local Latitude & Longitude') }}
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; font-size: 6.8pt;">
+    <!-- Left Column -->
+    <div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
+        <span style="color: #5F5A55;">Tithi (Lunar Day)</span>
+        <strong style="color: #1A1A1E;">{{ panchang.tithi or 'Shukla Navami' }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
+        <span style="color: #5F5A55;">Nakshatra (Asterism)</span>
+        <strong style="color: #1A1A1E;">{{ panchang.nakshatra or 'Pushya' }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
+        <span style="color: #5F5A55;">Vedic Yoga</span>
+        <strong style="color: #1A1A1E;">{{ panchang.yoga or 'Sadhya' }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
+        <span style="color: #5F5A55;">Karana (Half Tithi)</span>
+        <strong style="color: #1A1A1E;">{{ panchang.karana or 'Bava' }}</strong>
+      </div>
+    </div>
+
+    <!-- Right Column -->
+    <div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
+        <span style="color: #5F5A55;">Sun Sign (Surya Rashi)</span>
+        <strong style="color: #1A1A1E;">{{ panchang.solarSign or chartData.sunSign or 'Leo' }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD; background: #FCFAF6;">
+        <span style="color: #8C500A; font-weight: 700;">Today's Transit Moon</span>
+        <strong style="color: #8C3C00;">{{ panchang.lunarSign or chartData.moonSign or 'Cancer' }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0; border-bottom: 0.4pt solid #EBE1CD;">
+        <span style="color: #5F5A55;">Sunrise / Sunset</span>
+        <strong style="color: #1A1A1E;">{{ d(panchang.sunrise or '06:12 AM') }} / {{ d(panchang.sunset or '06:18 PM') }}</strong>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 2.5pt 0;">
+        <span style="color: #5F5A55;">Brahma Muhurta</span>
+        <strong style="color: #1A1A1E;">{{ d(panchang.brahmaMuhurta or '04:36 - 05:24 AM') }}</strong>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2. Active Planetary Positions & Natal Transits Table -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt; margin-bottom: 8pt;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4pt;">
+    <div style="font-size: 7.6pt; font-weight: 700; color: #7E5F18; text-transform: uppercase;">
+      {{ t('dailyInsights.pdf.natal_positions', 'NATAL PLANETARY POSITIONS (LAHIRI NIRAYANA)') }}
+    </div>
+    <div style="font-size: 6.2pt; font-style: italic; color: #A08246;">
+      {{ t('dailyInsights.pdf.lahiri_coords', 'Lahiri Ayanamsha (Chitra Paksha) Ephemeris Coordinates') }}
+    </div>
+  </div>
+
+  <table class="data-table" style="font-size: 6.8pt; margin-bottom: 0;">
+    <thead>
+      <tr>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_planet', 'PLANET (GRAHA)') }}</th>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_sanskrit', 'SANSKRIT') }}</th>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_rashi', 'RASHI (SIGN)') }}</th>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_longitude', 'LONGITUDE') }}</th>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_nakshatra_pada', 'NAKSHATRA & PADA') }}</th>
+        <th style="padding: 3pt 5pt;">{{ t('dailyInsights.pdf.col_house', 'HOUSE') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Ascendant Row -->
+      <tr style="background: #FAF6EF; font-weight: 700;">
+        <td style="color: #8C500A; padding: 2.5pt 5pt;">{{ t('dailyInsights.pdf.ascendant_lagna', 'Ascendant (Lagna)') }}</td>
+        <td style="color: #825514; padding: 2.5pt 5pt;">Lagna</td>
+        <td style="color: #8C3C00; padding: 2.5pt 5pt;">{{ chartData.ascendant.signName or 'Pisces' }}</td>
+        <td style="padding: 2.5pt 5pt;">{{ d(chartData.ascendant.degree or 9.85) }}&deg;</td>
+        <td style="padding: 2.5pt 5pt;">{{ chartData.ascendant.nakshatra or 'Uttara Bhadrapada' }} (P1)</td>
+        <td style="padding: 2.5pt 5pt;">H1</td>
+      </tr>
+
+      {% if chartData.planets and chartData.planets|length > 0 %}
+        {% for p in chartData.planets[:9] %}
+        <tr style="{% if loop.index % 2 == 1 %}background: #FCFCFA;{% endif %}">
+          <td style="padding: 2.5pt 5pt; font-weight: 600;">{{ t_planet(p.name) }}{% if p.isRetrograde %} (R){% endif %}</td>
+          <td style="padding: 2.5pt 5pt; color: #5A5A50;">{{ p.sanskritName or '-' }}</td>
+          <td style="padding: 2.5pt 5pt; color: #28282D;">{{ t_sign(p.signName) }}</td>
+          <td style="padding: 2.5pt 5pt;">{{ d(p.degree) }}&deg;</td>
+          <td style="padding: 2.5pt 5pt;">{{ t_nakshatra(p.nakshatra) }} (P{{ d(p.pada or 1) }})</td>
+          <td style="padding: 2.5pt 5pt;">H{{ d(p.house or loop.index) }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td style="padding: 2.5pt 5pt; font-weight: 600;">Sun (Surya)</td>
+          <td style="padding: 2.5pt 5pt; color: #5A5A50;">Surya</td>
+          <td style="padding: 2.5pt 5pt;">Leo</td>
+          <td style="padding: 2.5pt 5pt;">14.19&deg;</td>
+          <td style="padding: 2.5pt 5pt;">Uttara Phalguni (P3)</td>
+          <td style="padding: 2.5pt 5pt;">H4</td>
+        </tr>
+        <tr style="background: #FAF6EF; font-weight: 700;">
+          <td style="color: #8C500A; padding: 2.5pt 5pt;">Moon (Janma Rashi)</td>
+          <td style="color: #825514; padding: 2.5pt 5pt;">Chandra</td>
+          <td style="color: #8C3C00; padding: 2.5pt 5pt;">Cancer</td>
+          <td style="padding: 2.5pt 5pt;">5.02&deg;</td>
+          <td style="padding: 2.5pt 5pt;">Ashlesha (P4)</td>
+          <td style="padding: 2.5pt 5pt;">H8</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 3. Two Clean Balanced Cards: Sacred Muhurtas & Numerology Guidance -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; margin-bottom: 8pt;">
+  <!-- Left Card: Sacred Muhurta Windows -->
+  <div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt;">
+    <div style="font-size: 7.2pt; font-weight: 700; color: #7E5F18; text-transform: uppercase; margin-bottom: 4pt;">
+      {{ t('dailyInsights.pdf.muhurta_title', 'SACRED MUHURTA & TIMING WINDOWS') }}
+    </div>
+
+    <!-- Abhijit -->
+    <div style="margin-bottom: 4pt;">
+      <div style="font-size: 6.4pt; font-weight: 700; color: #B58328; text-transform: uppercase;">
+        {{ t('dailyInsights.pdf.abhijit_label', 'ABHIJIT MUHURTA (VIJAY KAAL)') }}
+      </div>
+      <div style="font-size: 7.2pt; font-weight: 700; color: #1A1A1E;">
+        {{ d(panchang.abhijitMuhurta or '11:45 AM - 12:35 PM') }}
+      </div>
+      <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
+        {{ t('dailyInsights.pdf.abhijit_desc', 'Optimal window for vital negotiations, new initiatives & contracts.') }}
+      </div>
+    </div>
+
+    <!-- Brahma -->
+    <div style="margin-bottom: 4pt;">
+      <div style="font-size: 6.4pt; font-weight: 700; color: #B58328; text-transform: uppercase;">
+        {{ t('dailyInsights.pdf.brahma_label', 'BRAHMA MUHURTA (AMRIT KAAL)') }}
+      </div>
+      <div style="font-size: 7.2pt; font-weight: 700; color: #1A1A1E;">
+        {{ d(panchang.brahmaMuhurta or '04:36 - 05:24 AM') }}
+      </div>
+      <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
+        {{ t('dailyInsights.pdf.brahma_desc', 'Pre-dawn sattvic window ideal for meditation, pranayama & clarity.') }}
+      </div>
+    </div>
+
+    <!-- Rahu Kaal -->
+    <div>
+      <div style="font-size: 6.4pt; font-weight: 700; color: #C62828; text-transform: uppercase;">
+        {{ t('dailyInsights.pdf.rahu_label', 'RAHU KAAL (INAUSPICIOUS - AVOID)') }}
+      </div>
+      <div style="font-size: 7.2pt; font-weight: 700; color: #C62828;">
+        {{ d(panchang.rahuKaal or '07:30 - 09:00 AM') }}
+      </div>
+      <div style="font-size: 5.8pt; color: #46464B; line-height: 1.3;">
+        {{ t('dailyInsights.pdf.rahu_desc', 'Avoid signing major legal contracts, journeys or new financial starts.') }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Card: Daily Numerology & Harmonic Remedies -->
+  <div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 6pt 9pt;">
+    <div style="font-size: 7.2pt; font-weight: 700; color: #7E5F18; text-transform: uppercase; margin-bottom: 3pt;">
+      {{ t('dailyInsights.pdf.numerology_title', 'DAILY NUMEROLOGY & HARMONIC REMEDIES') }}
+    </div>
+
+    <div style="font-size: 6.2pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+      {{ t('dailyInsights.pdf.natal_vibrations', 'NATAL CORE VIBRATIONS') }}
+    </div>
+    <!-- Mulank Highlight Pill Box -->
+    <div style="background: #FFFFFF; border: 0.6pt solid #BE8728; border-radius: 2pt; padding: 2.5pt 5pt; margin-bottom: 3pt;">
+      <div style="font-size: 5.2pt; font-weight: 700; color: #8C500A; text-transform: uppercase;">
+        {{ t('dailyInsights.pdf.psychic_number', 'PSYCHIC NUMBER (MULANK)') }}
+      </div>
+      <div style="font-size: 7.2pt; font-weight: 700; color: #82410A;">
+        Mulank {{ d(numerology.mulank or 1) }} ({{ t('dailyInsights.pdf.ruled_by', 'Ruled by') }} {{ numerology.mulankPlanet or 'Sun' }})
+      </div>
+    </div>
+    <div style="font-size: 6.2pt; color: #323237; margin-bottom: 4pt;">
+      &bull; Bhagyank (Destiny): {{ d(numerology.bhagyank or 1) }} | Namank: {{ d(numerology.namankChaldean or 1) }}
+    </div>
+
+    <div style="font-size: 6.2pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+      {{ t('dailyInsights.pdf.transit_harmonizers', 'DAILY TRANSIT HARMONIZERS') }}
+    </div>
+    <div style="font-size: 6.2pt; color: #323237; line-height: 1.35; margin-bottom: 3pt;">
+      <div>&bull; {{ t('dailyInsights.pdf.lucky_number_today', 'Lucky Number Today') }}: {{ d(aiInsights.luckyNumber or numerology.mulank or 7) }} ({{ aiInsights.luckyPlanet or 'Sun' }})</div>
+      <div>&bull; {{ t('dailyInsights.pdf.lucky_color_today', 'Lucky Color & Tone') }}: {{ aiInsights.luckyColor or 'Bright Yellow' }}</div>
+    </div>
+
+    <div style="font-size: 6.2pt; font-weight: 700; color: #B58328; text-transform: uppercase; margin-bottom: 2pt;">
+      {{ t('dailyInsights.pdf.sacred_gems', 'SACRED REMEDIAL GEMS & DIRECTION') }}
+    </div>
+    <div style="font-size: 6.2pt; color: #323237; line-height: 1.35;">
+      <div>&bull; {{ t('dailyInsights.pdf.primary_gem', 'Primary Gem') }}: {{ numerology.luckyGemstones[0] if numerology.luckyGemstones else 'Ruby / Manikya' }}</div>
+      <div>&bull; {{ t('dailyInsights.pdf.favorable_days', 'Favorable Days') }}: {{ numerology.luckyDays | join(', ') if numerology.luckyDays else 'Sunday, Tuesday' }} | Dir: East</div>
+    </div>
+  </div>
+</div>
+
+<!-- 4. Official Verification & Astrological Disclaimer Box -->
+<div style="background: #FFFFFF; border: 0.8pt solid #C9A050; border-radius: 4pt; padding: 5pt 9pt;">
+  <div style="font-size: 6.5pt; font-weight: 700; color: #7E5F18; text-transform: uppercase; margin-bottom: 2pt;">
+    {{ t('dailyInsights.pdf.disclaimer_title', 'CERTIFIED VEDIC VERIFICATION & TRADITIONAL DISCLAIMER') }}
+  </div>
+  <div style="font-size: 5.8pt; color: #5A5550; line-height: 1.35;">
+    {{ t('dailyInsights.pdf.disclaimer_text', 'This Daily Vedic Transit & Panchang Report is computationally generated using Swiss Ephemeris mathematical coordinates and Classical Jyotish principles (Lahiri Nirayana). Vedic astrological guidance describes planetary archetypes and cosmic tendencies to foster self-awareness, timing awareness, and proactive wisdom. It does not replace professional medical, legal, or financial counsel.') }}
+  </div>
+</div>
+
+{% endblock %}

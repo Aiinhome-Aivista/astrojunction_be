@@ -170,3 +170,76 @@ def calculate_numerology_endpoint():
         print(f"Error in calculate_numerology_endpoint: {e}")
         return _error(str(e), "CALCULATION_ERROR", 500)
 
+
+def generate_numerology_pdf():
+    try:
+        from flask import Response
+        from datetime import datetime
+        from services.pdf_service import render_pdf
+        body = request.get_json(silent=True) or {}
+        lang = body.get("lang") or body.get("language") or "en"
+        profile = body.get("profile") or {}
+        numerology = body.get("numerology") or body.get("activeNumerology") or {}
+        labels = body.get("labels") or {}
+
+        p_name = profile.get("fullName") or profile.get("name") or "Seeker"
+        clean_name = "".join(c for c in p_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        date_str = profile.get("birthDate") or datetime.now().strftime("%Y-%m-%d")
+
+        # Format grid counts if missing
+        if "gridCounts" not in numerology:
+            counts = {}
+            for d_char in "123456789":
+                counts[d_char] = "Absent"
+            # Extract from complete date string
+            cleaned_dob = "".join(c for c in date_str if c.isdigit())
+            for c in cleaned_dob:
+                if c in counts:
+                    if counts[c] == "Absent":
+                        counts[c] = "1x"
+                    else:
+                        prev = int(counts[c].replace("x", ""))
+                        counts[c] = f"{prev + 1}x"
+            numerology["gridCounts"] = counts
+
+        # Format 8 planes if missing
+        if "planes" not in numerology or not numerology["planes"]:
+            numerology["planes"] = [
+                {"name": labels.get("numerology.planes.thought", "Thought Plane (4-9-2)"), "numbers": "4-9-2", "strength": 67, "domain": "Mental Foresight"},
+                {"name": labels.get("numerology.planes.will", "Will Plane (3-5-7)"), "numbers": "3-5-7", "strength": 33, "domain": "Inner Willpower"},
+                {"name": labels.get("numerology.planes.action", "Action Plane (8-1-6)"), "numbers": "8-1-6", "strength": 33, "domain": "Execution & Commerce"},
+                {"name": labels.get("numerology.planes.mental", "Mental Plane (4-3-8)"), "numbers": "4-3-8", "strength": 33, "domain": "Logic & Memory"},
+                {"name": labels.get("numerology.planes.emotional", "Emotional Plane (9-5-1)"), "numbers": "9-5-1", "strength": 67, "domain": "Compassion & Empathy"},
+                {"name": labels.get("numerology.planes.practical", "Practical Plane (2-7-6)"), "numbers": "2-7-6", "strength": 33, "domain": "Hands-on Grounding"},
+                {"name": labels.get("numerology.planes.golden", "Golden Yog / Raj Yog (4-5-6)"), "numbers": "4-5-6", "strength": 67, "domain": "Supreme Wealth & Status"},
+                {"name": labels.get("numerology.planes.silver", "Silver Yog (2-5-8)"), "numbers": "2-5-8", "strength": 33, "domain": "Property & Assets"},
+            ]
+
+        from services.pdf_service import resolve_translation
+        doc_title = resolve_translation("numerology.pdf.report_title", lang, labels, default="Sacred Numbers & Lo Shu Magic Grid Report")
+        doc_subtitle = resolve_translation("numerology.subtitle", lang, labels, default="Vedic & Chaldean Sacred Vibration Matrix")
+
+        data = {
+            "doc_type": "numerology",
+            "doc_title": "SACRED NUMEROLOGY & LO SHU MAGIC GRID BLUEPRINT" if lang == "en" else resolve_translation("numerology.pdf.report_title", lang, labels, default="SACRED NUMEROLOGY & LO SHU MAGIC GRID BLUEPRINT"),
+            "doc_subtitle": doc_subtitle,
+            "doc_subtitle_tagline": f"Vedic Sidereal & Chaldean Sacred Vibration Matrix ({date_str})",
+            "doc_date": date_str,
+            "profile": profile,
+            "numerology": numerology,
+            "has_english_fallback": False,
+        }
+
+        pdf_bytes = render_pdf("dossier_pdf.html", lang, data, labels)
+        filename = f"AstroJunction_Numerology_{clean_name}_{date_str}_{lang}.pdf"
+
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as exc:
+        print(f"Error generating Numerology PDF: {exc}")
+        return jsonify({"status": "error", "message": str(exc), "error_code": "PDF_ERROR"}), 500
+
+

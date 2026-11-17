@@ -1,0 +1,231 @@
+{% extends "base_pdf.html" %}
+
+{% block content %}
+<!-- PAGE 1: NATAL PARTICULARS, PLANETARY EPHEMERIS & 12 HOUSES -->
+
+<!-- 1. Client & Natal Coordinates Box (Matching Master Image 5) -->
+<div class="particulars-box">
+  <div class="particulars-col-left">
+    <div class="box-label">{{ t('birthChart.pdf.client_particulars', 'CLIENT & BIRTH PARTICULARS') }}</div>
+    <div class="box-title">{{ profile.fullName or 'Seeker' }}</div>
+    <div class="box-meta">
+      {{ t('birthChart.pdf.born', 'Born') }}: {{ d(profile.birthDate) }}{% if profile.birthTime %} at {{ d(profile.birthTime) }}{% endif %} | {{ profile.birthPlace or 'Global' }}
+    </div>
+  </div>
+  <div class="particulars-col-right">
+    <div class="box-label">{{ t('birthChart.pdf.coordinates', 'CELESTIAL & TRADITION COORDINATES') }}</div>
+    <div style="font-size: 8.5pt; font-weight: 700; color: #1A1A1E;">
+      {{ t('birthChart.pdf.lagna', 'Lagna') }}: {% if lang == 'en' %}{{ (chartData.ascendant and chartData.ascendant.signName) or 'Aries' }}{% else %}{{ t_sign((chartData.ascendant and chartData.ascendant.signName) or 'Aries') }}{% endif %} ({{ d((chartData.ascendant and chartData.ascendant.degree) or 0) }}&deg;) &nbsp;|&nbsp; {{ t('birthChart.pdf.moon', 'Moon') }}: {% if lang == 'en' %}{{ (chartData.moon and chartData.moon.signName) or 'Taurus' }}{% else %}{{ t_sign((chartData.moon and chartData.moon.signName) or 'Taurus') }}{% endif %}
+    </div>
+    <div class="box-meta" style="margin-top: 1.5pt;">
+      {{ t('birthChart.pdf.nakshatra', 'Nakshatra') }}: {{ t_nakshatra((chartData.moon and chartData.moon.nakshatra) or '') }} ({{ t('birthChart.pdf.pada_prefix', 'Pada') }} {{ d((chartData.moon and chartData.moon.pada) or 1) }}){% if chartData.ascendant and chartData.ascendant.nakshatra %} &nbsp;|&nbsp; {{ t('birthChart.pdf.asc', 'Asc') }}: {{ t_nakshatra(chartData.ascendant.nakshatra) }}{% endif %}
+    </div>
+    <div class="box-meta" style="margin-top: 1.5pt; font-weight: 700; color: #B58328;">
+      {{ t('birthChart.pdf.active_tradition', 'Active Tradition') }}: {{ tradition_title or 'Parashari Jyotish' }}
+    </div>
+  </div>
+</div>
+
+<!-- 2. Graha Ephemeris Positions (Nine Planetary Coordinates Table Matching Master Image 5) -->
+<div class="card-gold">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.graha_ephemeris', 'GRAHA EPHEMERIS POSITIONS (NINE PLANETARY COORDINATES)') }}
+  </div>
+  <table class="master-table">
+    <thead>
+      <tr>
+        <th style="width: 14%;">{{ t('birthChart.pdf.col_planet', 'Planet') }}</th>
+        <th style="width: 12%;">{{ t('birthChart.pdf.col_sanskrit', 'Sanskrit') }}</th>
+        <th style="width: 16%;">{{ t('birthChart.pdf.col_sign', 'Sign / Rashi') }}</th>
+        <th style="width: 11%;">{{ t('birthChart.pdf.col_degree', 'Degree') }}</th>
+        <th style="width: 18%;">{{ t('birthChart.pdf.col_nakshatra', 'Nakshatra') }}</th>
+        <th style="width: 8%;">{{ t('birthChart.pdf.col_pada', 'Pada') }}</th>
+        <th style="width: 11%;">{{ t('birthChart.pdf.col_dignity', 'Dignity') }}</th>
+        <th style="width: 10%;">{{ t('birthChart.pdf.col_motion', 'Motion') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in chartData.planets %}
+      <tr>
+        <td><strong>{% if lang == 'en' %}{{ p.name }}{% else %}{{ t_planet(p.name) }}{% endif %}</strong></td>
+        <td>{{ p.sanskritName or p.name }}</td>
+        <td>{% if lang == 'en' %}{{ p.signName }}{% else %}{{ t_sign(p.signName) }}{% endif %} (H{{ d(p.houseNumber or p.house or 1) }})</td>
+        <td>{{ d(p.degree) }}&deg;</td>
+        <td>{{ t_nakshatra(p.nakshatra) }}</td>
+        <td>{{ t('birthChart.pdf.pada_prefix', 'Pada') }} {{ d(p.pada or 1) }}</td>
+        <td>
+          <span style="color: #B58328; font-weight: 600;">{{ t_dignity(p.dignity) }}</span>
+        </td>
+        <td>
+          {% if p.isRetrograde %}
+            <span style="color: #DC2626; font-weight: 600;">{{ t('birthChart.pdf.retrograde', 'Retrograde (R)') }}</span>
+          {% else %}
+            <span style="color: #059669; font-weight: 600;">{{ t('birthChart.pdf.direct', 'Direct (D)') }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 3. Twelve Bhavas (House Particulars & Significances Matching Master Image 5 & 6) -->
+<div class="card-gold" style="margin-bottom: 0;">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.twelve_bhavas', 'TWELVE BHAVAS (HOUSE PARTICULARS & SIGNIFICANCES)') }}
+  </div>
+  <table style="width: 100%; border-collapse: separate; border-spacing: 4pt 3pt;">
+    <tbody>
+      {% for pair in chartData.houses|batch(2) %}
+      <tr style="page-break-inside: avoid;">
+        {% for h in pair %}
+        <td style="width: 50%; vertical-align: top; border: 0.4pt solid #E2D3B0; border-radius: 3pt; padding: 3pt 5pt; background: #FFFFFF;">
+          <div style="font-weight: 700; color: #7E5F18; font-size: 6.8pt;">
+            H{{ d(h.houseNumber) }}: {% if lang == 'en' %}{{ h.sanskritName }}{% else %}{{ t_house_name(h.houseNumber, h.sanskritName) }}{% endif %}
+          </div>
+          <div style="font-size: 6.5pt; color: #1A1A1E; margin-top: 1pt;">
+            <strong>{{ t('birthChart.pdf.sign', 'Sign') }}:</strong> {% if lang == 'en' %}{{ h.signName }}{% else %}{{ t_sign(h.signName) }}{% endif %} (<strong>{{ t('birthChart.pdf.lord', 'Lord') }}:</strong> {% if lang == 'en' %}{{ h.signLord }}{% else %}{{ t_planet(h.signLord) }}{% endif %})
+          </div>
+          <div style="font-size: 6pt; color: #505050; margin-top: 1pt;">
+            <strong>{{ t('birthChart.pdf.occupants', 'Occupants') }}:</strong> {% if lang == 'en' %}{{ h.occupants or 'No Planets' }}{% else %}{{ t_planets_list(h.occupants) }}{% endif %}{% if h.kpSubLord %} &nbsp;|&nbsp; <strong>{{ t('birthChart.pdf.sub_lord', 'Sub-Lord') }}:</strong> {% if lang == 'en' %}{{ h.kpSubLord }}{% else %}{{ t_planet(h.kpSubLord) }}{% endif %}{% endif %}
+          </div>
+        </td>
+        {% endfor %}
+        {% if pair|length == 1 %}
+        <td style="width: 50%; border: none;"></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- PAGE 2: TRADITION SYNTHESIS, YOGAS, DOSHAS, DASHAS & REMEDIES (Matching Master English Page 2) -->
+<div class="page-break"></div>
+
+<div class="page2-header-bar">
+  <span>ASTROJUNCTION &bull; {{ tradition_title or '5 VEDIC TRADITIONS & BIRTH CHART REPORT' }}</span>
+</div>
+
+<!-- 4. Vedic Yogas Box -->
+<div class="card-gold avoid-break">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.vedic_yogas', 'AUSPICIOUS VEDIC YOGAS & CELESTIAL FORMATIONS') }}
+  </div>
+  <div style="font-size: 7.2pt; color: #3C3831; line-height: 1.45;">
+    {% if chartData.yogas and chartData.yogas|length > 0 %}
+      {% for y in chartData.yogas[:5] %}
+      <div style="margin-bottom: 3.5pt;">
+        <span style="font-weight: 700; color: #B58328;">&bull; {{ y.name }}{% if y.sanskritName and y.sanskritName != y.name %} ({{ y.sanskritName }}){% endif %}</span>
+        <div style="font-size: 6.8pt; color: #4B463E; margin-left: 8pt;">{{ y.effect or y.description }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color: #6B655B;">&bull; {{ t('birthChart.yogas.none_prominent', 'Harmonious planetary configurations active across Kendras and Trikonas.') }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 5. Vedic Doshas Box -->
+<div class="card-gold avoid-break">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.vedic_doshas', 'VEDIC DOSHAS & PLANETARY AFFLICTION EVALUATION') }}
+  </div>
+  <div style="font-size: 7.2pt; color: #3C3831; line-height: 1.45;">
+    {% if chartData.doshas and chartData.doshas|length > 0 %}
+      {% for d_item in chartData.doshas[:5] %}
+      <div style="margin-bottom: 3.5pt;">
+        <span style="font-weight: 700; color: {% if d_item.isPresent %}#B58328{% else %}#059669{% endif %};">&bull; {{ d_item.name }}: {% if d_item.isPresent %}{{ t('birthChart.pdf.present', 'Present') }} ({{ d_item.severity or 'Moderate' }}){% else %}{{ t('birthChart.pdf.not_afflicted', 'Not Afflicted / Absent') }}{% endif %}</span>
+        <div style="font-size: 6.8pt; color: #4B463E; margin-left: 8pt;">{{ d_item.remedy or d_item.description or t('birthChart.dosha.pacification', 'Standard Vedic pacification practices recommended.') }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="margin-bottom: 2pt;">
+        &bull; <strong>{{ t('birthChart.yogas_doshas.doshas.manglik.name', 'Manglik (Kuja) Dosha') }}:</strong>
+        {% if chartData.isManglik %}
+          <span class="badge badge-red">{{ t('birthChart.pdf.present', 'Present') }}</span>
+        {% else %}
+          <span class="badge badge-green">{{ t('birthChart.pdf.not_afflicted', 'Not Afflicted / Absent') }}</span>
+        {% endif %}
+      </div>
+      <div>
+        &bull; <strong>{{ t('birthChart.yogas_doshas.doshas.sadesati.name', 'Saturn (Shani) Transit') }}:</strong>
+        <span class="badge badge-gold">{{ chartData.sadeSatiStatus or t('birthChart.dosha.stable_transit', 'Direct Orbit / Stable Transit') }}</span>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 6. Vimshottari Dasha Cycles (3x2 Grid Matching Master) -->
+<div class="card-gold avoid-break">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.vimshottari_title', 'VIMSHOTTARI DASHA CYCLES & ACTIVE MAHADASHAS') }}
+  </div>
+  <table style="width: 100%; border-collapse: separate; border-spacing: 4pt 3pt;">
+    <tbody>
+      {% set dasha_list = chartData.dashas or chartData.dashaPeriods or [] %}
+      {% for pair in dasha_list[:6]|batch(3) %}
+      <tr>
+        {% for d_item in pair %}
+        <td style="width: 33.33%; vertical-align: top; border: 0.4pt solid {% if d_item.isCurrent %}#C9A050{% else %}#E2D3B0{% endif %}; border-radius: 3pt; padding: 3pt 5pt; background: #FFFFFF;">
+          <div style="font-size: 6.8pt; font-weight: 700; color: {% if d_item.isCurrent %}#B58328{% else %}#1E1B15{% endif %};">
+            {% if lang == 'en' %}{{ d_item.planet }}{% else %}{{ t_planet(d_item.planet) }}{% endif %} ({{ d(d_item.durationYears or 19) }} {{ t('birthChart.pdf.yrs', 'Yrs') }}){% if d_item.isCurrent %} &bull; {{ t('birthChart.pdf.active', 'ACTIVE') }}{% endif %}
+          </div>
+          <div style="font-size: 6pt; color: #505050; margin-top: 1pt;">
+            {{ d(d_item.startDate[:4] if d_item.startDate else '2018') }} &ndash; {{ d(d_item.endDate[:4] if d_item.endDate else '2037') }}
+          </div>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 7. Active Tradition Guidance & Life Strategy Synthesis -->
+<div class="card-gold avoid-break">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.synthesis_title', 'ACTIVE TRADITION GUIDANCE & LIFE STRATEGY SYNTHESIS') }}
+  </div>
+  <div style="font-size: 7.2pt; color: #2B2823; line-height: 1.42;">
+    {% if parsed_synthesis_sections and parsed_synthesis_sections|length > 0 %}
+      {% for sec in parsed_synthesis_sections %}
+        <div style="{% if not loop.first %}margin-top: 3pt; border-top: 0.3pt dashed #E2D3B0; padding-top: 2pt;{% endif %}">
+          <div style="font-weight: 700; color: #7E5F18; font-size: 7.2pt; margin-bottom: 1.5pt;">
+            {{ sec.title }}
+          </div>
+          {% for card in sec.cards %}
+          <div style="margin-bottom: 2pt;">
+            &bull; <strong>{{ card.title }}:</strong> {{ card.summary }}
+          </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <div>
+        {{ tradition_synthesis or t('birthChart.synthesis.default_body', 'According to Brihat Parashara Hora Shastra, the benefic alignment across Kendra and Trikona houses reinforces analytical acumen, ethical leadership, and enduring spiritual resilience.') }}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 8. Recommended Trikona Gemstones & Vedic Remedies -->
+<div class="card-gold avoid-break" style="margin-bottom: 0;">
+  <div class="card-gold-title">
+    {{ t('birthChart.pdf.remedies_title', 'RECOMMENDED TRIKONA GEMSTONES & VEDIC REMEDIES') }}
+  </div>
+  <div style="font-size: 7.2pt; color: #3C3831; line-height: 1.45;">
+    <div>
+      &bull; <strong>{{ t('birthChart.remedies.favorable_gemstones', 'Primary Recommended Gemstone') }}:</strong>
+      <span style="font-weight: 600; color: #1E1B15;">
+        {% if lang == 'en' %}{{ chartData.favorableGem or 'Yellow Sapphire (Pukhraj) / Ruby (Manikya)' }}{% else %}{{ t_gem(chartData.favorableGem) if chartData.favorableGem else t('birthChart.remedies.yellow_sapphire', 'Yellow Sapphire (Pukhraj) / Ruby (Manikya)') }}{% endif %}
+      </span>
+      <span style="color: #6E695F;"> &ndash; {{ t('birthChart.remedies.gem_note', 'Wear in gold or panchdhatu on Thursday morning after purifying with Ganga jal.') }}</span>
+    </div>
+    <div style="margin-top: 3pt;">
+      &bull; <strong>{{ t('birthChart.remedies.sadhana_title', 'Daily Sadhana & Upaya') }}:</strong>
+      <span>{{ chartData.prescribedMantra or t('birthChart.remedies.default_mantra', 'Chant Gayatri Mantra (108 times daily at sunrise) and Maha Mrityunjaya Mantra for protection, intellectual acumen, and sustained prosperity.') }}</span>
+    </div>
+  </div>
+</div>
+{% endblock %}

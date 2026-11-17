@@ -68,6 +68,7 @@ def calculate_ephemeris_panchang():
         print(f"Error in calculate_ephemeris_panchang: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
 def daily_horoscope():
     import time
     start_time = time.time()
@@ -180,4 +181,71 @@ def daily_horoscope():
     except Exception as e:
         print(f"Error in daily_horoscope: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def generate_daily_insights_pdf():
+    try:
+        from flask import Response
+        from services.pdf_service import render_pdf
+        body = request.get_json(silent=True) or {}
+        lang = body.get("lang") or body.get("language") or "en"
+        profile = body.get("profile") or {}
+        panchang = body.get("panchang") or {}
+        ai_insights = body.get("aiInsights") or {}
+        labels = body.get("labels") or {}
+
+        p_name = profile.get("fullName") or profile.get("name") or "Seeker"
+        clean_name = "".join(c for c in p_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        date_str = panchang.get("date") or profile.get("birthDate") or datetime.now().strftime("%Y-%m-%d")
+
+        # Fallback to server-side cache if frontend didn't supply aiInsights
+        if not ai_insights or not ai_insights.get("summary"):
+            profile_id = str(profile.get("id") or profile.get("fullName") or profile.get("birthDate") or "anonymous").strip().lower()
+            with _cache_lock:
+                for k, v in DAILY_HOROSCOPE_CACHE.items():
+                    if k.startswith(f"{profile_id}_{date_str}") and k.endswith(f"_{lang}"):
+                        ai_insights = v.get("insights", v)
+                        break
+                if not ai_insights or not ai_insights.get("summary"):
+                    for k, v in DAILY_HOROSCOPE_CACHE.items():
+                        if k.startswith(f"{profile_id}_{date_str}"):
+                            ai_insights = v.get("insights", v)
+                            break
+
+        from services.pdf_service import resolve_translation
+        doc_title = resolve_translation("dailyInsights.pdf.report_title", lang, labels, default="Daily Cosmic Insights & Vedic Panchang")
+        doc_subtitle = resolve_translation("dailyInsights.pdf.precision", lang, labels, default="Authentic Vedic Ephemeris & AI Synthesis")
+
+        chart_data = body.get("chartData") or {}
+        if not isinstance(chart_data, dict):
+            chart_data = {}
+        if "ascendant" not in chart_data or not chart_data["ascendant"]:
+            chart_data["ascendant"] = {"signName": "Pisces", "signSanskrit": "মীন" if lang == "bn" else "Meena"}
+
+        data = {
+            "doc_title": "DAILY VEDIC INSIGHTS & PLANETARY TRANSITS" if lang == "en" else doc_title,
+            "doc_subtitle": doc_subtitle,
+            "doc_subtitle_tagline": f"Precision Astronomical Ephemeris • Drig-Ganita Panchanga ({date_str})",
+            "doc_date": date_str,
+            "profile": profile,
+            "panchang": panchang,
+            "aiInsights": ai_insights,
+            "chartData": chart_data,
+            "numerology": body.get("numerology") or {},
+            "rituals": body.get("rituals") or {},
+            "has_english_fallback": lang != "en" and (ai_insights.get("isEnglishFallback") or not ai_insights.get("summary")),
+        }
+
+        pdf_bytes = render_pdf("daily_insights_pdf.html", lang, data, labels)
+        filename = f"AstroJunction_Daily_Report_{clean_name}_{date_str}_{lang}.pdf"
+
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as exc:
+        print(f"Error generating Daily Insights PDF: {exc}")
+        return jsonify({"status": "error", "message": str(exc), "error_code": "PDF_ERROR"}), 500
+
 

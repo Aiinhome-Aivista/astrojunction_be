@@ -582,8 +582,8 @@ def _normalize_partner(p: dict) -> dict:
         "birthTime": str(p.get("time") or p.get("birthTime") or "").strip(),
         "place": str(p.get("place") or p.get("birthPlace") or "").strip(),
         "birthPlace": str(p.get("place") or p.get("birthPlace") or "").strip(),
-        "latitude": float(p["latitude"]),
-        "longitude": float(p["longitude"]),
+        "latitude": float(p.get("latitude") or 0.0),
+        "longitude": float(p.get("longitude") or 0.0),
         "timezone": tz_name,
         "horoscopeSystem": p.get("horoscopeSystem", "vedic"),
         "houseSystem": p.get("houseSystem") or p.get("house_system") or "W",
@@ -1837,11 +1837,113 @@ def generate_direct_pdf():
             "max_score": float(result.get("maxScore", 36)),
         }
 
-        pdf_bytes = generate_match_report_pdf(row)
-
+        lang = body.get("lang") or body.get("language") or "en"
+        labels = body.get("labels") or {}
         clean_p1 = "".join(c for c in p1_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
         clean_p2 = "".join(c for c in p2_name if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
-        filename = f"AstroJunction_Kundli_Milan_{clean_p1}_and_{clean_p2}.pdf"
+        filename = f"AstroJunction_Kundli_Milan_{clean_p1}_and_{clean_p2}_{lang}.pdf"
+
+        # Try unified multi-language HTML/CSS PDF engine first
+        try:
+            from services.pdf_service import render_pdf
+            from datetime import datetime
+
+            # Normalise kootas list for template
+            kootas_list = []
+            raw_kootas = result.get("kootas") or report_data.get("kootas") or []
+            if isinstance(raw_kootas, dict):
+                for k_id, k_val in raw_kootas.items():
+                    kid_clean = str(k_id).lower().replace("_koota", "").replace(" ", "_")
+                    kootas_list.append({
+                        "id": kid_clean,
+                        "name": str(k_id).capitalize(),
+                        "domain": k_val.get("area") or k_val.get("domain") or k_val.get("description") or "",
+                        "p1Attribute": k_val.get("p1Value") or k_val.get("p1Attribute") or k_val.get("p1") or k_val.get("partner1") or "-",
+                        "p2Attribute": k_val.get("p2Value") or k_val.get("p2Attribute") or k_val.get("p2") or k_val.get("partner2") or "-",
+                        "maxScore": k_val.get("maxScore") or k_val.get("max") or k_val.get("maxPoints") or 0,
+                        "obtainedScore": k_val.get("obtainedScore") or k_val.get("score") or k_val.get("obtainedPoints") or 0,
+                    })
+            elif isinstance(raw_kootas, list):
+                for k_val in raw_kootas:
+                    kid = str(k_val.get("id") or k_val.get("koota_id") or k_val.get("name") or "").lower()
+                    kid_clean = kid.replace("_koota", "").replace(" ", "_")
+                    kootas_list.append({
+                        "id": kid_clean,
+                        "name": k_val.get("name") or kid_clean.capitalize(),
+                        "sanskritName": k_val.get("sanskritName") or "",
+                        "domain": k_val.get("area") or k_val.get("domain") or "",
+                        "p1Attribute": k_val.get("p1Value") or k_val.get("p1Attribute") or k_val.get("p1") or "-",
+                        "p2Attribute": k_val.get("p2Value") or k_val.get("p2Attribute") or k_val.get("p2") or "-",
+                        "maxScore": k_val.get("maxScore") or k_val.get("max") or k_val.get("maxPoints") or 0,
+                        "obtainedScore": k_val.get("obtainedScore") or k_val.get("score") or k_val.get("obtainedPoints") or 0,
+                    })
+
+            from services.pdf_service import resolve_translation
+            tot_score = float(result.get("totalScore", row.get("total_score", 0)))
+            if tot_score >= 28:
+                rec_default = "Uttam Milan — Auspicious Astrological Union"
+                rec_key = "kundliMilan.verdicts.uttam"
+            elif tot_score >= 24:
+                rec_default = "Madhyam Shubh — Very Good Match"
+                rec_key = "kundliMilan.verdicts.madhyam"
+            elif tot_score >= 18:
+                rec_default = "Samanya — Moderate Match (Remedies Recommended)"
+                rec_key = "kundliMilan.verdicts.samanya"
+            else:
+                rec_default = "Alpa Milan — Challenging Match"
+                rec_key = "kundliMilan.verdicts.alpa"
+            recommendation_text = resolve_translation(rec_key, lang, labels, default=rec_default)
+
+            template_match_result = {
+                "totalScore": tot_score,
+                "scorePercentage": int(round((tot_score / 36.0) * 100)) if tot_score else 78,
+                "recommendation": recommendation_text,
+                "kootas": kootas_list,
+                "manglikAnalysis": body.get("manglikAnalysis") or result.get("manglikAnalysis"),
+                "nadiBhakootAnalysis": body.get("nadiBhakootAnalysis") or result.get("nadiBhakootAnalysis"),
+                "synastrySummary": body.get("synastrySummary") or result.get("synastrySummary"),
+                "elementalHarmony": body.get("elementalHarmony") or result.get("elementalHarmony"),
+                "daivajnaSynthesis": body.get("daivajnaSynthesis") or body.get("aiSynthesis"),
+            }
+
+            doc_title = resolve_translation("kundliMilan.pdf.report_title", lang, labels, default="KUNDLI MILAN & RELATIONSHIP COMPATIBILITY REPORT")
+            doc_subtitle = resolve_translation("kundliMilan.pdf.ashta_koota", lang, labels, default="Ashta Koota 36 Gunas & Synastry Dossier")
+
+            partners_info = report_data.get("partners") or {}
+            p1_info = partners_info.get("partner1") or {}
+            p2_info = partners_info.get("partner2") or {}
+            manglik_info = result.get("manglik") or {}
+
+            pdf_data = {
+                "doc_title": doc_title,
+                "doc_subtitle": doc_subtitle,
+                "doc_date": partner1.get("dob") or datetime.now().strftime("%Y-%m-%d"),
+                "partner1": {
+                    "fullName": p1_name,
+                    "birthDate": partner1.get("dob") or "",
+                    "birthTime": partner1.get("time") or "",
+                    "birthPlace": partner1.get("place") or "",
+                    "rashi": partner1.get("rashi") or p1_info.get("rashi") or report_data.get("p1_rashi") or "Cancer",
+                    "nakshatra": partner1.get("nakshatra") or p1_info.get("nakshatra") or report_data.get("p1_nakshatra") or "Pushya",
+                    "isManglik": bool(partner1.get("isManglik") if partner1.get("isManglik") is not None else manglik_info.get("isPartner1Manglik", False)),
+                },
+                "partner2": {
+                    "fullName": p2_name,
+                    "birthDate": partner2.get("dob") or "",
+                    "birthTime": partner2.get("time") or "",
+                    "birthPlace": partner2.get("place") or "",
+                    "rashi": partner2.get("rashi") or p2_info.get("rashi") or report_data.get("p2_rashi") or "Taurus",
+                    "nakshatra": partner2.get("nakshatra") or p2_info.get("nakshatra") or report_data.get("p2_nakshatra") or "Rohini",
+                    "isManglik": bool(partner2.get("isManglik") if partner2.get("isManglik") is not None else manglik_info.get("isPartner2Manglik", False)),
+                },
+                "matchResult": template_match_result,
+                "has_english_fallback": lang != "en" and body.get("isEnglishFallback", False),
+            }
+
+            pdf_bytes = render_pdf("kundli_milan_pdf.html", lang, pdf_data, labels)
+        except Exception as render_err:
+            print(f"HTML PDF render error ({render_err}), falling back to ReportLab engine.")
+            pdf_bytes = generate_match_report_pdf(row)
 
         return Response(
             pdf_bytes,
