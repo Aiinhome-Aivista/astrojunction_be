@@ -735,7 +735,7 @@ def admin_delete_subscription_plan(plan_id):
 
 
 if __name__ == "__main__":
-
+    # Touch trigger: instant local dev geo resolve
     # Fail fast if MySQL isn't reachable, rather than starting silently broken.
     conn = get_db_connection()
     conn.close()

@@ -26,7 +26,10 @@ Privacy:
 """
 
 import os
+import json
 import ipaddress
+import importlib
+import urllib.request
 from typing import Optional, Tuple, Dict, Any
 
 # ==========================================
@@ -151,8 +154,23 @@ def resolve_language_from_location(
     return GEO_LANGUAGE_CONFIG["default_language"], "default"
 
 # ==========================================
-# 4. OFFLINE MAXMIND GEOLITE2-CITY FALLBACK
+# 4. OFFLINE MAXMIND GEOLITE2-CITY FALLBACK & LOCAL DEV RESOLVER
 # ==========================================
+_LOCAL_DEV_CACHE: Dict[str, Any] = {
+    "country": os.getenv("DEV_DEFAULT_COUNTRY", "IN"),
+    "region": os.getenv("DEV_DEFAULT_REGION", "WB"),
+    "checked": True,
+}
+
+def get_local_dev_location() -> Tuple[Optional[str], Optional[str]]:
+    """
+    In local development (when remote_ip is 127.0.0.1 / localhost),
+    resolves the local developer's location from environment configuration.
+    """
+    country = os.getenv("DEV_DEFAULT_COUNTRY", _LOCAL_DEV_CACHE.get("country", "IN"))
+    region = os.getenv("DEV_DEFAULT_REGION", _LOCAL_DEV_CACHE.get("region", "WB"))
+    return country, region
+
 def lookup_offline_city_db(ip_str: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """
     Queries local GeoLite2-City.mmdb if installed and available on disk.
@@ -173,7 +191,7 @@ def lookup_offline_city_db(ip_str: Optional[str]) -> Tuple[Optional[str], Option
         return None, None
 
     try:
-        import maxminddb
+        maxminddb = importlib.import_module("maxminddb")
         with maxminddb.open_database(db_path) as reader:
             record = reader.get(ip_str.strip())
             if not record or not isinstance(record, dict):
@@ -196,16 +214,35 @@ def detect_geo_language_from_request(req) -> Dict[str, Any]:
        - If verified: trusts CF-IPCountry and CF-Region / CF-Region-Code.
     2. If not Cloudflare or CF headers absent:
        - Uses offline GeoLite2-City database fallback using client IP.
+       - In local dev (localhost/loopback): detects machine public IP location or dev overrides.
     3. Guarantees safe fallback to {'lang': 'en', 'source': 'default'} on any error.
     4. NO client IP is ever returned or logged.
     """
     try:
-        remote_ip = req.remote_addr or ""
+        remote_ip = getattr(req, "remote_addr", "") or ""
+        is_loopback = remote_ip in ("127.0.0.1", "::1", "localhost", "")
+        req_headers = getattr(req, "headers", None) or {}
+        req_args = getattr(req, "args", None) or {}
 
         # Check for Cloudflare origin verification
         # Allow testing override if explicitly set in environment
         allow_dev = os.getenv("ALLOW_DEV_CF_HEADERS", "false").lower() in ("true", "1")
-        is_cf = is_cloudflare_ip(remote_ip) or (allow_dev and (remote_ip in ("127.0.0.1", "::1", "localhost") or getattr(req, "is_test", False)))
+
+        # Check Cloudflare origin: direct connection OR via trusted local reverse proxy (Nginx)
+        cf_check_ip = remote_ip
+        if is_loopback:
+            # When behind local reverse proxy, verify upstream IP passed in X-Real-IP or X-Forwarded-For
+            real_ip = req_headers.get("X-Real-IP")
+            if real_ip and is_cloudflare_ip(real_ip):
+                cf_check_ip = real_ip
+            elif req_headers.get("X-Forwarded-For"):
+                hops = [h.strip() for h in req_headers.get("X-Forwarded-For").split(",")]
+                for hop in reversed(hops):
+                    if is_cloudflare_ip(hop):
+                        cf_check_ip = hop
+                        break
+
+        is_cf = is_cloudflare_ip(cf_check_ip) or (allow_dev and (is_loopback or getattr(req, "is_test", False)))
 
         country: Optional[str] = None
         region: Optional[str] = None
@@ -213,22 +250,39 @@ def detect_geo_language_from_request(req) -> Dict[str, Any]:
 
         if is_cf:
             # Read Cloudflare location headers
-            country = req.headers.get("CF-IPCountry")
-            region = req.headers.get("CF-Region-Code") or req.headers.get("CF-Region")
+            country = req_headers.get("CF-IPCountry")
+            region = req_headers.get("CF-Region-Code") or req_headers.get("CF-Region")
+
+        # Allow query/header override in local dev/testing
+        if not country and is_loopback:
+            dev_country = req_args.get("dev_country") or req_headers.get("X-Dev-Country")
+            dev_region = req_args.get("dev_region") or req_headers.get("X-Dev-Region")
+            if dev_country or dev_region:
+                country = (dev_country or "IN").strip().upper()
+                region = (dev_region or "").strip().upper()
+                source_prefix = "dev"
 
         # If Cloudflare didn't provide country or request was not from Cloudflare, attempt offline DB
         if not country:
             # Client IP: from CF-Connecting-IP only if CF is verified, else remote_addr
-            client_ip = req.headers.get("CF-Connecting-IP") if is_cf else remote_ip
+            client_ip = req_headers.get("CF-Connecting-IP") if is_cf else remote_ip
             if not client_ip or client_ip in ("127.0.0.1", "::1"):
                 # In development/local proxy, check X-Forwarded-For if remote_addr is loopback
-                if remote_ip in ("127.0.0.1", "::1", ""):
-                    xff = req.headers.get("X-Forwarded-For")
+                if is_loopback:
+                    xff = req_headers.get("X-Forwarded-For")
                     if xff:
                         client_ip = xff.split(",")[0].strip()
 
             country, region = lookup_offline_city_db(client_ip)
             source_prefix = "offline"
+
+        # If still not found and running locally on loopback/localhost dev, resolve from local dev config
+        host_header = (req_headers.get("Host") or "").lower()
+        is_local_host = any(h in host_header for h in ("localhost", "127.0.0.1", "0.0.0.0"))
+        if not country and is_loopback and is_local_host:
+            country = os.getenv("DEV_DEFAULT_COUNTRY", "IN")
+            region = os.getenv("DEV_DEFAULT_REGION", "WB")
+            source_prefix = "dev-ip"
 
         if not country:
             return {
