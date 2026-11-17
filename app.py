@@ -27,6 +27,7 @@ from controllers import full_report_controller
 from controllers import AI_response
 from controllers import payment_controller
 from controllers import subscription_controller
+from controllers import geo_controller
 import jwt as pyjwt
 
 
@@ -36,6 +37,12 @@ CORS(app)
 # ==========================================
 # 🌍 LANDING PAGE APIs (Publicly Accessible)
 # ==========================================
+
+# 0. Visitor Geolocation Language Detection
+@app.route("/geo/language", methods=["GET"])
+@app.route("/api/geo/language", methods=["GET"])
+def get_geo_language():
+    return geo_controller.resolve_geo_language()
 
 # 1. Ask Jyotish Chatbot (Landing Page)
 @app.route("/api/public-chat", methods=["POST"])

@@ -9,3 +9,5 @@ failed.json
 *.xlsx
 /lib
 *.zip
+*.mmdb
+data/geoip/
