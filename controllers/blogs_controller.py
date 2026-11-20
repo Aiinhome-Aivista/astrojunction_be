@@ -57,6 +57,22 @@ def ensure_slug_schema():
 # Auto-verify on controller load
 ensure_slug_schema()
 
+def _clean_blog_preview(blog: dict) -> None:
+    """Strip any raw HTML tags or entities from blog preview."""
+    if not blog:
+        return
+    raw = blog.get('preview') or ''
+    if not raw and blog.get('content'):
+        raw = blog.get('content') or ''
+    if raw:
+        cleaned = re.sub(r'<[^>]+>', ' ', str(raw))
+        cleaned = re.sub(r'&nbsp;', ' ', cleaned)
+        cleaned = re.sub(r'&[a-zA-Z0-9#]+;', ' ', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        if not blog.get('preview'):
+            cleaned = cleaned[:140] + ('...' if len(cleaned) > 140 else '')
+        blog['preview'] = cleaned
+
 def list_blogs():
     conn = get_db_connection()
     if not conn:
@@ -84,7 +100,23 @@ def list_blogs():
                     pass
             else:
                 blog['tags'] = []
+            _clean_blog_preview(blog)
                 
+        lang = request.args.get('lang', 'en').lower().strip()
+        if lang in ('hi', 'bn', 'ta', 'fr'):
+            from services.landing_translation import translate_blog
+            translated_blogs = []
+            for b in blogs:
+                try:
+                    tb = translate_blog(b, lang, is_detail=False)
+                    translated_blogs.append(tb)
+                except Exception as ex:
+                    print(f"Error translating single blog {b.get('id')}: {ex}")
+                    translated_blogs.append(b)
+            blogs = translated_blogs
+            for blog in blogs:
+                _clean_blog_preview(blog)
+
         return jsonify({"status": "success", "data": blogs}), 200
     except Exception as e:
         print(f"Error fetching blogs: {e}")
@@ -117,6 +149,13 @@ def get_blog(blog_id):
         else:
             blog['tags'] = []
             
+        _clean_blog_preview(blog)
+        lang = request.args.get('lang', 'en').lower().strip()
+        if lang in ('hi', 'bn', 'ta', 'fr'):
+            from services.landing_translation import translate_blog
+            blog = translate_blog(blog, lang, is_detail=True)
+            _clean_blog_preview(blog)
+
         return jsonify({"status": "success", "data": blog}), 200
     except Exception as e:
         print(f"Error fetching blog: {e}")
@@ -397,6 +436,14 @@ def get_blog_by_slug(slug):
                 pass
         else:
             blog['tags'] = []
+
+        _clean_blog_preview(blog)
+        lang = request.args.get('lang', 'en').lower().strip()
+        if lang in ('hi', 'bn', 'ta', 'fr'):
+            from services.landing_translation import translate_blog
+            blog = translate_blog(blog, lang, is_detail=True)
+            _clean_blog_preview(blog)
+
         return jsonify({"status": "success", "data": blog}), 200
     except Exception as e:
         print(f"Error fetching blog by slug: {e}")

@@ -346,13 +346,15 @@ def _validate_translation(
         if len(fr_matches) < 3:
             return False, "French stop words or accented characters missing"
 
-    # 4. Word count ratio: 60% - 170% of English word count
+    # 4. Word count ratio: 60% - 170% of English word count (with agglutination tolerance for Tamil)
     eng_words = len(eng_text.split())
     trans_words = len(trans_text.split())
 
     if eng_words >= 15:
+        min_ratio = 0.40 if lang == "ta" else 0.55
+        max_ratio = 1.75
         ratio = trans_words / float(eng_words)
-        if ratio < 0.55 or ratio > 1.75:
+        if ratio < min_ratio or ratio > max_ratio:
             return False, f"Word count ratio outside bounds: {ratio:.2f} ({trans_words} vs {eng_words} words)"
 
     return True, ""
@@ -402,17 +404,37 @@ DO NOT include any explanation or text outside the JSON object."""
     payload = {}
     for it in items_chunk:
         cat = it.get("category", "")
-        payload[cat] = {
-            "text": it.get("text") or "",
-            "remedy": it.get("remedy") or "",
-            "affirmation": it.get("affirmation") or "",
-            "lucky_time": it.get("lucky_time") or "",
-            "tip_for_the_day": it.get("tip_for_the_day") or "",
-        }
+        cat_payload = {"text": it.get("text") or ""}
+        for fld in ("remedy", "affirmation", "lucky_time", "tip_for_the_day"):
+            val = it.get(fld)
+            if val and str(val).strip():
+                cat_payload[fld] = str(val).strip()
+        payload[cat] = cat_payload
 
     user_prompt = f"Translate the following {meta.get('period', 'daily')} horoscope items for {meta.get('sign', 'sign')} ({meta.get('system', 'tropical')} system) into {target_lang}:\n\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
 
     return system_prompt, user_prompt
+
+
+def _try_repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
+    """Attempts to salvage completed category objects from a truncated JSON string."""
+    text = text.strip()
+    if not text.startswith("{"):
+        return None
+    repaired = {}
+    # Matches top-level "category": { ... }
+    pattern = r'"([a-zA-Z0-9_]+)"\s*:\s*(\{[^{}]*\})'
+    for match in re.finditer(pattern, text):
+        cat = match.group(1)
+        try:
+            val = json.loads(match.group(2))
+            if isinstance(val, dict) and "text" in val:
+                repaired[cat] = val
+        except Exception:
+            pass
+    if repaired:
+        return repaired
+    return None
 
 
 def _execute_mistral_chunk(
@@ -420,13 +442,9 @@ def _execute_mistral_chunk(
     lang: str,
     meta: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """Calls Mistral Cloud API with JSON object response mode and retry."""
-    base_url = get_setting("MISTRAL_CLOUD_URL", "https://api.mistral.ai").rstrip("/")
-    api_key = get_setting("MISTRAL_CLOUD_API_KEY", "")
-    model = get_setting("MISTRAL_MODEL", "ministral-3b-2512")
-    if not api_key:
-        print("[Landing Translation Error] MISTRAL_CLOUD_API_KEY is not configured.")
-        return None
+    """Calls configured admin LLM engine through services.llm_service with JSON object response mode and retry."""
+    from services.llm_service import _execute_llm
+    from services.settings_service import get_setting
 
     period = meta.get("period", "daily")
     # Indic scripts use higher token density
@@ -439,65 +457,46 @@ def _execute_mistral_chunk(
     max_tokens = max_tokens_map.get(period, 4000)
 
     system_prompt, user_prompt = _build_translation_prompt(items_chunk, lang, meta)
-    messages = [
-        {"role": "system", "content": system_prompt},
+    history = [
         {"role": "user", "content": user_prompt}
     ]
 
     for attempt in range(1, MAX_RETRIES + 1):
         start_t = time.time()
-        resp = None
         try:
-            resp = requests.post(
-                f"{base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "Connection": "close"
-                },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.1,
-                    "max_tokens": max_tokens,
-                    "response_format": {"type": "json_object"}
-                },
-                timeout=60
-            )
-
+            content = _execute_llm(system_prompt, history, max_tokens=max_tokens)
             latency = time.time() - start_t
 
-            if resp.status_code != 200:
-                print(f"[Landing Translation Warning] Mistral HTTP {resp.status_code} (attempt {attempt}): {resp.text[:180]}")
-                time.sleep(1.0 * attempt)
-                continue
-
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            usage = data.get("usage", {})
-            prompt_toks = usage.get("prompt_tokens", 0)
-            comp_toks = usage.get("completion_tokens", 0)
+            active_llm = get_setting("ACTIVE_LLM", "mistral_cloud").strip().lower()
+            model_name = get_setting(f"{active_llm.upper()}_MODEL", "default")
 
             with _CALL_STATS["lock"]:
                 _CALL_STATS["total_calls"] += 1
-                _CALL_STATS["total_prompt_tokens"] += prompt_toks
-                _CALL_STATS["total_completion_tokens"] += comp_toks
 
-            print(f"[Landing Translation API] Lang: {lang} | Sign: {meta.get('sign')} | Period: {period} | Categories: {[it.get('category') for it in items_chunk]} | Tokens: {prompt_toks}+{comp_toks}={prompt_toks+comp_toks} | Time: {latency:.2f}s")
+            print(f"[Landing Translation API] Lang: {lang} | Sign: {meta.get('sign')} | System: {meta.get('system')} | Period: {period} | Categories: {[it.get('category') for it in items_chunk]} | Model: {model_name} | Provider: {active_llm} | Time: {latency:.2f}s")
 
-            # Parse JSON
-            parsed = json.loads(content)
-            if not isinstance(parsed, dict):
-                raise ValueError("Parsed translation output is not a JSON object")
+            # Clean output if wrapped in markdown code fence
+            clean_content = content.strip() if content else ""
+            if clean_content.startswith("```"):
+                clean_content = re.sub(r"^```[a-zA-Z]*\n?", "", clean_content)
+                clean_content = re.sub(r"\n?```$", "", clean_content).strip()
 
-            return parsed
+            try:
+                parsed = json.loads(clean_content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Parsed translation output is not a JSON object")
+                return parsed
+            except (json.JSONDecodeError, ValueError) as json_err:
+                print(f"[Landing Translation Warning] JSON parsing issue (attempt {attempt}): {json_err}. Attempting salvage...")
+                salvaged = _try_repair_truncated_json(clean_content)
+                if salvaged:
+                    print(f"[Landing Translation Salvage] Successfully salvaged {len(salvaged)} categories from truncated output.")
+                    return salvaged
+                raise
 
-        except (json.JSONDecodeError, KeyError, IndexError, requests.RequestException) as err:
+        except Exception as err:
             print(f"[Landing Translation Error] Attempt {attempt} failed: {err}")
             time.sleep(1.0 * attempt)
-        finally:
-            if resp is not None:
-                resp.close()
 
     return None
 
@@ -744,4 +743,207 @@ def get_translation_stats() -> Dict[str, Any]:
         stats["cached_entries"] = len(_TRANSLATION_CACHE)
         stats["failure_entries"] = len(_FAILURE_CACHE)
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Blog Posts Translation
+# ---------------------------------------------------------------------------
+
+_BLOG_CACHE: Dict[Tuple[str, int, str, bool], Dict[str, Any]] = {}
+_blog_cache_lock = threading.Lock()
+_DISK_CACHE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "upload", "blog_translations_cache.json"))
+_IN_FLIGHT_LOCK = threading.Lock()
+_IN_FLIGHT_EVENTS: Dict[Tuple[str, int, str, bool], threading.Event] = {}
+
+def _load_disk_cache():
+    global _BLOG_CACHE
+    if not os.path.exists(_DISK_CACHE_FILE):
+        return
+    try:
+        with open(_DISK_CACHE_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+            with _blog_cache_lock:
+                for k_str, val in raw.items():
+                    parts = k_str.split("_")
+                    if len(parts) >= 4:
+                        lang = parts[0]
+                        b_id = int(parts[1])
+                        t_hash = parts[2]
+                        is_det = bool(int(parts[3]))
+                        _BLOG_CACHE[(lang, b_id, t_hash, is_det)] = val
+    except Exception as e:
+        print(f"[Disk Cache Warning] Error loading blog cache: {e}")
+
+def _save_disk_cache_entry(key: Tuple[str, int, str, bool], value: Dict[str, Any]):
+    try:
+        os.makedirs(os.path.dirname(_DISK_CACHE_FILE), exist_ok=True)
+        raw = {}
+        if os.path.exists(_DISK_CACHE_FILE):
+            try:
+                with open(_DISK_CACHE_FILE, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception:
+                raw = {}
+        k_str = f"{key[0]}_{key[1]}_{key[2]}_{int(key[3])}"
+        raw[k_str] = value
+        with open(_DISK_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(raw, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[Disk Cache Warning] Error saving blog cache entry: {e}")
+
+_load_disk_cache()
+
+def translate_blog(blog: Dict[str, Any], lang: str, is_detail: bool = False) -> Dict[str, Any]:
+    """
+    Translates a blog's title, preview, category, and optionally content into target language (hi, bn, ta, fr).
+    Results are cached in-memory and persistently on disk.
+    """
+    if not blog or lang == "en" or lang not in SUPPORTED_LANGUAGES:
+        return dict(blog)
+
+    blog_id = blog.get("id") or 0
+    title = str(blog.get("title") or "")
+    preview = str(blog.get("preview") or "")
+    content = str(blog.get("content") or "")
+    title_hash = _get_sha1(title)
+    cache_key = (lang, blog_id, title_hash, is_detail)
+
+    with _blog_cache_lock:
+        cached = _BLOG_CACHE.get(cache_key)
+        if cached:
+            cached_copy = dict(cached)
+            if cached_copy.get("preview"):
+                clean_cp = re.sub(r'<[^>]+>', ' ', str(cached_copy["preview"]))
+                clean_cp = re.sub(r'&nbsp;', ' ', clean_cp)
+                clean_cp = re.sub(r'&[a-zA-Z0-9#]+;', ' ', clean_cp)
+                cached_copy["preview"] = re.sub(r'\s+', ' ', clean_cp).strip()
+            return cached_copy
+
+    # Deduplicate concurrent in-flight translation for the exact same blog
+    is_initiator = False
+    wait_event = None
+    with _IN_FLIGHT_LOCK:
+        if cache_key in _IN_FLIGHT_EVENTS:
+            wait_event = _IN_FLIGHT_EVENTS[cache_key]
+        else:
+            wait_event = threading.Event()
+            _IN_FLIGHT_EVENTS[cache_key] = wait_event
+            is_initiator = True
+
+    if not is_initiator and wait_event:
+        # Wait up to 25 seconds for the initiator thread to finish translating
+        wait_event.wait(timeout=25)
+        with _blog_cache_lock:
+            cached = _BLOG_CACHE.get(cache_key)
+            if cached:
+                cached_copy = dict(cached)
+                if cached_copy.get("preview"):
+                    cached_copy["preview"] = re.sub(r'<[^>]+>', ' ', str(cached_copy["preview"])).strip()
+                return cached_copy
+        # If still not cached, return untranslated blog safely
+        return dict(blog)
+
+    try:
+        clean_source_preview = re.sub(r'<[^>]+>', ' ', preview)
+        clean_source_preview = re.sub(r'&nbsp;', ' ', clean_source_preview)
+        clean_source_preview = re.sub(r'&[a-zA-Z0-9#]+;', ' ', clean_source_preview)
+        clean_source_preview = re.sub(r'\s+', ' ', clean_source_preview).strip()
+
+        if not clean_source_preview and content:
+            clean_source_content = re.sub(r'<[^>]+>', ' ', content)
+            clean_source_content = re.sub(r'&nbsp;', ' ', clean_source_content)
+            clean_source_content = re.sub(r'&[a-zA-Z0-9#]+;', ' ', clean_source_content)
+            clean_source_content = re.sub(r'\s+', ' ', clean_source_content).strip()
+            clean_source_preview = clean_source_content[:140] + ('...' if len(clean_source_content) > 140 else '')
+
+        from services.llm_service import _execute_llm
+        lang_name_map = {
+            "hi": "Hindi (हिन्दी)",
+            "bn": "Bengali (বাংলা)",
+            "ta": "Tamil (தமிழ்)",
+            "fr": "French (Français)"
+        }
+        target_lang = lang_name_map.get(lang, "Hindi")
+        glossary_dict = GLOSSARY.get(lang, {})
+        glossary_json = json.dumps(glossary_dict, ensure_ascii=False)
+
+        content_schema = '"content": "...",' if is_detail and content else ""
+        system_prompt = f"""You are a professional Vedic astrologer and literary translator for AstroJunction.
+Translate the provided astrological blog into {target_lang}.
+
+STRICT RULES:
+1. Spiritual depth, astrological insight, and authentic tone must faithfully match the original English text.
+2. If 'content' contains HTML tags (such as <p>, <h3>, <strong>, <em>, <ul>, <li>), keep ALL HTML tags valid and intact in 'content'.
+3. 'preview' MUST BE CLEAN PLAIN TEXT ONLY. STRICTLY DO NOT include any HTML tags (<p>, <strong>, <br>, <em>, etc.) in 'preview'.
+4. Keep the brand name "AstroJunction" untranslated.
+5. Keep core Sanskrit astrological concepts (Kundli, Jyotish, Raj Yoga, Sade Sati, Nakshatra, Graha, Lagna, Dasha) transliterated or appropriately represented in {target_lang}.
+6. Use this astrological glossary where applicable:
+{glossary_json}
+7. Return a STRICT JSON object with keys:
+{{
+  "title": "...",
+  "preview": "...",
+  {content_schema}
+  "category": "...",
+  "sub_category": "...",
+  "tags": ["..."]
+}}
+DO NOT include any markdown code fences or text outside the JSON object."""
+
+        payload = {
+            "title": title,
+            "preview": clean_source_preview,
+            "category": blog.get("category") or "",
+            "sub_category": blog.get("sub_category") or "",
+            "tags": blog.get("tags") or []
+        }
+        if is_detail and content:
+            payload["content"] = content
+
+        history = [{"role": "user", "content": f"Translate this Vedic astrology article into {target_lang}:\n\n{json.dumps(payload, ensure_ascii=False)}"}]
+
+        max_tokens = 4500 if is_detail and content else 1200
+        raw_res = _execute_llm(system_prompt, history, max_tokens=max_tokens)
+        clean = raw_res.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r"^```[a-zA-Z]*\n?", "", clean)
+            clean = re.sub(r"\n?```$", "", clean).strip()
+
+        parsed = json.loads(clean)
+        if isinstance(parsed, dict):
+            res_blog = dict(blog)
+            if parsed.get("title"):
+                res_blog["title"] = parsed["title"]
+            if parsed.get("preview"):
+                clean_p = re.sub(r'<[^>]+>', ' ', str(parsed["preview"]))
+                clean_p = re.sub(r'&nbsp;', ' ', clean_p)
+                clean_p = re.sub(r'&[a-zA-Z0-9#]+;', ' ', clean_p)
+                clean_p = re.sub(r'\s+', ' ', clean_p).strip()
+                res_blog["preview"] = clean_p
+            if is_detail and parsed.get("content"):
+                res_blog["content"] = parsed["content"]
+            if parsed.get("category"):
+                res_blog["category"] = parsed["category"]
+            if parsed.get("sub_category"):
+                res_blog["sub_category"] = parsed["sub_category"]
+            if parsed.get("tags") and isinstance(parsed["tags"], list):
+                res_blog["tags"] = parsed["tags"]
+            res_blog["translated"] = True
+
+            with _blog_cache_lock:
+                _BLOG_CACHE[cache_key] = res_blog
+            _save_disk_cache_entry(cache_key, res_blog)
+            return res_blog
+
+    except Exception as e:
+        print(f"[Blog Translation Warning] Error translating blog {blog_id} into {lang}: {e}")
+
+    finally:
+        if is_initiator:
+            with _IN_FLIGHT_LOCK:
+                ev = _IN_FLIGHT_EVENTS.pop(cache_key, None)
+                if ev:
+                    ev.set()
+
+    return dict(blog)
 

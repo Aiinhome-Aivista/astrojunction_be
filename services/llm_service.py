@@ -56,7 +56,7 @@ def _get_llm_timeout() -> int:
         return 30
 
 
-def _call_mistral_local(system_prompt: str, history: list) -> str:
+def _call_mistral_local(system_prompt: str, history: list, max_tokens: int = None) -> str:
     base_url = get_setting("MISTRAL_LOCAL_URL", "").rstrip("/")
     model = get_setting("MISTRAL_MODEL", "")
     if not base_url or not model:
@@ -64,9 +64,7 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
             "ACTIVE_LLM is set to mistral_local but MISTRAL_LOCAL_URL or MISTRAL_MODEL is not configured in Admin Settings."
         )
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: mistral_local | Model/Version: {model} | URL: {base_url}/api/generate")
-    print(f"{'='*60}\n")
+    # mistral_local endpoint call
 
     prompt = system_prompt + "\n\n"
     for msg in history:
@@ -78,10 +76,11 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
     resp = None
     try:
         try:
+            req_body = {"model": model, "prompt": prompt, "stream": False, "temperature": 0.1}
             resp = requests.post(
                 f"{base_url}/api/generate",
                 headers={"Connection": "close"},
-                json={"model": model, "prompt": prompt, "stream": False, "temperature": 0.1},
+                json=req_body,
                 timeout=timeout,
             )
         except requests.RequestException:
@@ -89,10 +88,15 @@ def _call_mistral_local(system_prompt: str, history: list) -> str:
             try:
                 print(f"[LLM FALLBACK CALL] Provider: mistral_local | Model/Version: {model} | URL: {base_url}/v1/chat/completions")
                 messages = [{"role": "system", "content": system_prompt}] + history
+                chat_payload = {"model": model, "messages": messages, "temperature": 0.1}
+                if max_tokens:
+                    chat_payload["max_tokens"] = max_tokens
+                if "json" in system_prompt.lower():
+                    chat_payload["response_format"] = {"type": "json_object"}
                 resp = requests.post(
                     f"{base_url}/v1/chat/completions",
                     headers={"Connection": "close"},
-                    json={"model": model, "messages": messages, "temperature": 0.1},
+                    json=chat_payload,
                     timeout=timeout,
                 )
                 if resp.status_code == 200:
@@ -129,10 +133,6 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
             "MISTRAL_CLOUD_API_KEY are not fully configured."
         )
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: mistral_cloud | Model/Version: {model} | URL: {base_url}/v1/chat/completions (max_tokens: {max_tokens})")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
     payload = {"model": model, "messages": messages, "temperature": 0.1}
@@ -154,7 +154,7 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: mistral_cloud | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] mistral_cloud ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -166,7 +166,7 @@ def _call_mistral_cloud(system_prompt: str, history: list, max_tokens: int = Non
             resp.close()
 
 
-def _call_gemini(system_prompt: str, history: list) -> str:
+def _call_gemini(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("GEMINI_API_KEY", "")
     model = get_setting("GEMINI_MODEL", "gemini-2.0-flash")
     if not api_key:
@@ -179,20 +179,24 @@ def _call_gemini(system_prompt: str, history: list) -> str:
         f"https://generativelanguage.googleapis.com/{api_version}/models/"
         f"{model}:generateContent?key={api_key}"
     )
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: gemini | Model: {model} | API Version: {api_version} | Endpoint: generativelanguage.googleapis.com/{api_version}/models/{model}:generateContent")
-    print(f"{'='*60}\n")
-
     convo_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
     full_prompt = f"{system_prompt}\n\n--- Conversation ---\n{convo_text}"
 
     timeout = _get_llm_timeout()
     resp = None
     try:
+        body = {"contents": [{"parts": [{"text": full_prompt}]}]}
+        gen_config = {"temperature": 0.1}
+        if max_tokens:
+            gen_config["maxOutputTokens"] = max_tokens
+        if "json" in system_prompt.lower():
+            gen_config["responseMimeType"] = "application/json"
+        body["generationConfig"] = gen_config
+
         resp = requests.post(
             url,
             headers={"Connection": "close"},
-            json={"contents": [{"parts": [{"text": full_prompt}]}]},
+            json=body,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -200,7 +204,7 @@ def _call_gemini(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         model_version = data.get("modelVersion", model)
-        print(f"[LLM RESPONSE] Provider: gemini | Configured Model: {model} | Resolved Version: {model_version}")
+        print(f"[LLM] gemini ({model_version}) -> 200 OK")
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError):
@@ -212,25 +216,27 @@ def _call_gemini(system_prompt: str, history: list) -> str:
             resp.close()
 
 
-def _call_openai(system_prompt: str, history: list) -> str:
+def _call_openai(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("OPENAI_API_KEY", "")
     base_url = get_setting("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     model = get_setting("OPENAI_MODEL", "gpt-4o-mini")
     if not api_key:
         raise LLMError("ACTIVE_LLM is set to openai but OPENAI_API_KEY is not configured.")
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: openai | Model/Version: {model} | URL: {base_url}/chat/completions")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
+    payload = {"model": model, "messages": messages, "temperature": 0.1}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    if "json" in system_prompt.lower():
+        payload["response_format"] = {"type": "json_object"}
+
     resp = None
     try:
         resp = requests.post(
             f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Connection": "close"},
-            json={"model": model, "messages": messages, "temperature": 0.1},
+            json=payload,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -238,7 +244,7 @@ def _call_openai(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: openai | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] openai ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -250,19 +256,21 @@ def _call_openai(system_prompt: str, history: list) -> str:
             resp.close()
 
 
-def _call_openrouter(system_prompt: str, history: list) -> str:
+def _call_openrouter(system_prompt: str, history: list, max_tokens: int = None) -> str:
     api_key = get_setting("OPENROUTER_API_KEY", "")
     base_url = get_setting("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
     model = get_setting("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
     if not api_key:
         raise LLMError("ACTIVE_LLM is set to openrouter but OPENROUTER_API_KEY is not configured.")
 
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL] Provider: openrouter | Model/Version: {model} | URL: {base_url}/chat/completions")
-    print(f"{'='*60}\n")
-
     timeout = _get_llm_timeout()
     messages = [{"role": "system", "content": system_prompt}] + history
+    payload = {"model": model, "messages": messages}
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    if "json" in system_prompt.lower():
+        payload["response_format"] = {"type": "json_object"}
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://astrojunction.com",
@@ -274,7 +282,7 @@ def _call_openrouter(system_prompt: str, history: list) -> str:
         resp = requests.post(
             f"{base_url}/chat/completions",
             headers=headers,
-            json={"model": model, "messages": messages},
+            json=payload,
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -282,7 +290,7 @@ def _call_openrouter(system_prompt: str, history: list) -> str:
 
         data = resp.json()
         returned_model = data.get("model", model)
-        print(f"[LLM RESPONSE] Provider: openrouter | Resolved Model/Version: {returned_model}")
+        print(f"[LLM] openrouter ({returned_model}) -> 200 OK")
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
@@ -315,22 +323,18 @@ def _execute_llm(system_prompt: str, history: list, max_tokens: int = None) -> s
         if not model_name:
             raise LLMError("ACTIVE_LLM is set to mistral_local but MISTRAL_MODEL is not configured in Admin Settings.")
 
-    print("\n" + "=" * 65)
-    print(f"🤖 [LLM CALL TRIGGERED] Active Provider: >>> {active_llm.upper()} <<<")
-    print(f"📦 [LLM MODEL]           Model Name:      >>> {model_name} <<<")
-    print(f"🛡️  [FAILOVER STATUS]    Fallback:        >>> NONE (Strict Single Engine) <<<")
-    print("=" * 65 + "\n")
+    print(f"[LLM] >>> {active_llm.upper()} ({model_name}) | max_tokens: {max_tokens or 'auto'}")
 
     if active_llm == "mistral_local":
-        return _call_mistral_local(system_prompt, history)
+        return _call_mistral_local(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "mistral_cloud":
         return _call_mistral_cloud(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "gemini":
-        return _call_gemini(system_prompt, history)
+        return _call_gemini(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "openai":
-        return _call_openai(system_prompt, history)
+        return _call_openai(system_prompt, history, max_tokens=max_tokens)
     elif active_llm == "openrouter":
-        return _call_openrouter(system_prompt, history)
+        return _call_openrouter(system_prompt, history, max_tokens=max_tokens)
     else:
         raise LLMError(f"Unknown or unconfigured LLM provider: '{active_llm}'")
 
@@ -591,21 +595,33 @@ def get_zodiac_compatibility_response(
     system: str = "tropical",
     language: str = "en"
 ) -> str:
+    lang_code = (language or "en").split("-")[0].lower()
+    lang_names = {
+        "hi": "Hindi (हिन्दी)",
+        "bn": "Bengali (বাংলা)",
+        "ta": "Tamil (தமிழ்)",
+        "fr": "French (Français)",
+        "en": "English"
+    }
+    target_lang = lang_names.get(lang_code, "English")
+
     system_prompt = f"""You are an expert Vedic and Western Astrologer. Calculate the unique compatibility between {sign_a.capitalize()} and {sign_b.capitalize()} using the {system} system.
 Calculate a highly accurate overall compatibility score (0-100) based on elements, modalities, and planetary rulers.
-MUST respond ONLY with valid JSON, in language {language} (if 'bn' use Bengali). Do not include any comments or markdown inside the JSON object:
+You MUST respond with a valid JSON object ONLY, without any markdown formatting, code fences (no ```json), or commentary outside the JSON:
 {{
   "overallScore": 68,
-  "elementSynergy": "Short description of elemental synergy",
-  "romanceAnalysis": "2-3 sentences about their romantic and soul synergy.",
-  "intellectualAnalysis": "2-3 sentences about how their minds and communication match.",
-  "growthPotential": "2-3 sentences about how they help each other evolve.",
-  "remedialAdvice": "1 sentence of practical spiritual/astrological advice for this pairing."
+  "elementSynergy": "Short description of elemental synergy written entirely and fluently in {target_lang}",
+  "romanceAnalysis": "2-3 sentences about their romantic and soul synergy written entirely and fluently in {target_lang}.",
+  "intellectualAnalysis": "2-3 sentences about how their minds and communication match written entirely and fluently in {target_lang}.",
+  "growthPotential": "2-3 sentences about how they help each other evolve written entirely and fluently in {target_lang}.",
+  "remedialAdvice": "1 sentence of practical spiritual/astrological advice for this pairing written entirely and fluently in {target_lang}."
 }}
+CRITICAL LANGUAGE REQUIREMENT:
+All descriptive text values in the JSON ("elementSynergy", "romanceAnalysis", "intellectualAnalysis", "growthPotential", "remedialAdvice") MUST be written 100% in {target_lang}. Do NOT use English unless the requested language is English.
 IMPORTANT: Replace 68 with the ACTUAL calculated compatibility score between these two signs (e.g. Leo and Aries might be 90, while Aries and Cancer might be 45). Make sure the score varies based on true astrological principles.
 """
     
-    history = [{"role": "user", "content": f"Calculate compatibility between {sign_a} and {sign_b}."}]
+    history = [{"role": "user", "content": f"Calculate compatibility between {sign_a} and {sign_b} in {target_lang}."}]
     try:
         res = _execute_llm(system_prompt, history)
             
@@ -620,15 +636,51 @@ IMPORTANT: Replace 68 with the ACTUAL calculated compatibility score between the
         return res
     except Exception as e:
         print(f"Error in get_zodiac_compatibility_response: {e}")
-        # Fallback static response if LLM fails
-        return json.dumps({
-            "overallScore": 70,
-            "elementSynergy": f"Synergy between {sign_a} and {sign_b}.",
-            "romanceAnalysis": "They share a unique bond shaped by their planetary rulers.",
-            "intellectualAnalysis": "Communication requires mutual understanding and patience.",
-            "growthPotential": "They can learn a lot from each other's differences.",
-            "remedialAdvice": "Focus on open communication and respect for boundaries."
-        })
+        # Localized fallback static responses if LLM fails
+        fallbacks = {
+            "hi": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} और {sign_b.capitalize()} के तत्वों का सुंदर और सामंजस्यपूर्ण मिलन।",
+                "romanceAnalysis": "दोनों के बीच स्वाभाविक आकर्षण और भावनात्मक ऊर्जा का सुंदर प्रवाह रहता है।",
+                "intellectualAnalysis": "संवाद में खुलापन और एक-दूसरे के विचारों का आदर इस रिश्ते को मजबूती प्रदान करता है।",
+                "growthPotential": "एक-दूसरे के मतभेदों को समझकर दोनों व्यक्तिगत और आध्यात्मिक रूप से विकसित होते हैं।",
+                "remedialAdvice": "धैर्य बनाए रखें, नियमित संवाद रखें और एक-दूसरे के दृष्टिकोण का सम्मान करें।"
+            },
+            "bn": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} এবং {sign_b.capitalize()}-এর প্রাকৃতিক উপাদানের চমৎকার সমন্বয়।",
+                "romanceAnalysis": "উভয়ের মধ্যে সহজাত আকর্ষণ এবং গভীর মানসিক সংযোগ গড়ে ওঠে।",
+                "intellectualAnalysis": "খোলামেলা ভাববিনিময় এবং পারস্পরিক বোঝাপড়া সম্পর্ককে স্থিতিশীল রাখে।",
+                "growthPotential": "একসাথে পথচলা উভয়ের মানসিক পরিপক্কতা এবং আত্মিক অগ্রগতিতে সাহায্য করে।",
+                "remedialAdvice": "ধৈর্য ও পারস্পরিক বিশ্বাসের সাথে পরস্পরের স্বাতন্ত্র্যকে সম্মান জানান।"
+            },
+            "ta": {
+                "overallScore": 72,
+                "elementSynergy": f"{sign_a.capitalize()} மற்றும் {sign_b.capitalize()} ஆகிய இரு ராசிகளின் பஞ்சபூத ஆற்றல் நல்லிணக்கம்.",
+                "romanceAnalysis": "இருவரிடமும் இயற்கையான ஈர்ப்பும் ஆழமான அன்பும் மலர்கிறது.",
+                "intellectualAnalysis": "தெளிவான கருத்துப் பகிர்வும் பரஸ்பர புரிதலும் உறவை பலப்படுத்துகிறது.",
+                "growthPotential": "இருவரும் இணைந்து செயல்பட்டு வாழ்வில் புதிய உயரங்களை எட்ட முடியும்.",
+                "remedialAdvice": "பொறுமையுடன் செயல்பட்டு ஒருவரையொருவர் மதித்து நடப்பது நன்மை தரும்."
+            },
+            "fr": {
+                "overallScore": 72,
+                "elementSynergy": f"Harmonie élémentaire dynamique entre {sign_a.capitalize()} et {sign_b.capitalize()}.",
+                "romanceAnalysis": "Les énergies astrales créent une attraction mutuelle et une profonde complicité amoureuse.",
+                "intellectualAnalysis": "La communication bienveillante et l'écoute réciproque fortifient leur lien.",
+                "growthPotential": "Les partenaires s'inspirent mutuellement pour évoluer et grandir ensemble.",
+                "remedialAdvice": "Cultivez la patience et respectez l'espace et l'individualité de chacun."
+            },
+            "en": {
+                "overallScore": 72,
+                "elementSynergy": f"Harmonious elemental alignment between {sign_a.capitalize()} and {sign_b.capitalize()}.",
+                "romanceAnalysis": "Planetary energies foster natural attraction, mutual understanding, and shared vision.",
+                "intellectualAnalysis": "Open communication and respect for differences strengthen the partnership.",
+                "growthPotential": "Both partners support and empower each other toward personal evolution.",
+                "remedialAdvice": "Practice patience, celebrate individuality, and maintain open communication."
+            }
+        }
+        chosen = fallbacks.get(lang_code, fallbacks["en"])
+        return json.dumps(chosen, ensure_ascii=False)
 
 
 def get_numerology_insights_response(
@@ -990,45 +1042,9 @@ You MUST use EXACTLY these 5 headings:
 
 
 def generate_raw_completion(prompt: str, model: str = None) -> str:
-    """Directly calls the configured LLM with a raw prompt string."""
-    raw_url = get_setting("MISTRAL_LOCAL_URL", "").strip().rstrip("/")
-    if not raw_url:
-        raise LLMError("MISTRAL_LOCAL_URL is not configured in Admin Settings.")
-    model_name = model or get_setting("MISTRAL_MODEL", "mistral:latest")
-    
-    if raw_url.endswith("/api/generate") or raw_url.endswith("/api/chat"):
-        endpoint_url = raw_url
-    else:
-        endpoint_url = f"{raw_url}/api/generate"
-
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": False,
-    }
-
-    print(f"\n{'='*60}")
-    print(f"[LLM CALL - Raw Completion] Provider: mistral_local | Model/Version: {model_name} | Endpoint: {endpoint_url}")
-    print(f"{'='*60}\n")
-
-    resp = None
-    try:
-        resp = requests.post(endpoint_url, headers={"Connection": "close"}, json=payload, timeout=120)
-        if resp.status_code != 200:
-            raise LLMError(f"LLM server returned HTTP {resp.status_code}: {resp.text[:300]}")
-
-        data = resp.json()
-        returned_model = data.get("model", model_name)
-        print(f"[LLM RESPONSE - Raw Completion] Resolved Model/Version: {returned_model}")
-        content = data.get("response") or (data.get("message") or {}).get("content") or data.get("text")
-        if not content:
-            raise LLMError("LLM server returned an unexpected response shape.")
-        return content
-    except requests.RequestException as e:
-        raise LLMError(f"Could not reach LLM endpoint at {endpoint_url}: {e}")
-    finally:
-        if resp is not None:
-            resp.close()
+    """Calls the active LLM configured in Admin Settings with a prompt string."""
+    history = [{"role": "user", "content": prompt}]
+    return _execute_llm("", history)
 
 
 def get_filtered_roadmap_predictions_response(
