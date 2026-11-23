@@ -132,12 +132,9 @@ def get_blog(blog_id):
         
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.callproc('sp_blog_ops', ('get_one', blog_id, '', '', '', '', '', '', '', '[]', 0))
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (blog_id,))
+        blog = cursor.fetchone()
         
-        blog = None
-        for result in cursor.stored_results():
-            blog = result.fetchone()
-            
         if not blog:
             return jsonify({"status": "error", "message": "Blog not found"}), 404
             
@@ -175,12 +172,13 @@ def create_blog():
         
     try:
         cursor = conn.cursor(dictionary=True)
-        
         tags_json = json.dumps(data.get('tags', []))
+        pinned_val = 1 if data.get('pinned') else 0
         
-        args = (
-            'create',
-            0,
+        cursor.execute("""
+            INSERT INTO blogs (title, content, preview, image_url, category, sub_category, status, tags, pinned)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
             data.get('title'),
             data.get('content'),
             data.get('preview'),
@@ -189,33 +187,30 @@ def create_blog():
             data.get('sub_category'),
             data.get('status', 'Draft'),
             tags_json,
-            1 if data.get('pinned') else 0
-        )
+            pinned_val
+        ))
+        conn.commit()
+        new_id = cursor.lastrowid
         
-        cursor.callproc('sp_blog_ops', args)
+        slug = _get_unique_slug(cursor, data.get('title'), new_id)
+        cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, new_id))
         conn.commit()
         
-        new_blog = None
-        for result in cursor.stored_results():
-            new_blog = result.fetchone()
-            
-        if new_blog:
-            new_id = new_blog.get('id')
-            slug = _get_unique_slug(cursor, data.get('title'), new_id)
-            cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, new_id))
-            conn.commit()
-            new_blog['slug'] = slug
-            if new_blog.get('tags'):
-                try:
-                    new_blog['tags'] = json.loads(new_blog['tags'])
-                except:
-                    pass
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (new_id,))
+        new_blog = cursor.fetchone()
+        
+        if new_blog and new_blog.get('tags'):
+            try:
+                new_blog['tags'] = json.loads(new_blog['tags'])
+            except (TypeError, json.JSONDecodeError):
+                pass
                 
         return jsonify({"status": "success", "data": new_blog}), 201
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error creating blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to create blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to create blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -232,12 +227,31 @@ def update_blog(blog_id):
     try:
         cursor = conn.cursor(dictionary=True)
         
+        # Verify blog exists first
+        cursor.execute("SELECT id FROM blogs WHERE id = %s", (blog_id,))
+        if not cursor.fetchone():
+            return jsonify({"status": "error", "message": "Blog not found"}), 404
+            
         tags_json = json.dumps(data.get('tags', []))
+        pinned_val = 1 if data.get('pinned') else 0
+        slug = _get_unique_slug(cursor, data.get('title'), blog_id)
         
-        args = (
-            'update',
-            blog_id,
+        cursor.execute("""
+            UPDATE blogs
+            SET title = %s,
+                slug = %s,
+                content = %s,
+                preview = %s,
+                image_url = %s,
+                category = %s,
+                sub_category = %s,
+                status = %s,
+                tags = %s,
+                pinned = %s
+            WHERE id = %s
+        """, (
             data.get('title'),
+            slug,
             data.get('content'),
             data.get('preview'),
             data.get('image_url'),
@@ -245,35 +259,26 @@ def update_blog(blog_id):
             data.get('sub_category'),
             data.get('status', 'Draft'),
             tags_json,
-            1 if data.get('pinned') else 0
-        )
-        
-        cursor.callproc('sp_blog_ops', args)
+            pinned_val,
+            blog_id
+        ))
         conn.commit()
         
-        updated_blog = None
-        for result in cursor.stored_results():
-            updated_blog = result.fetchone()
-            
-        if not updated_blog:
-            return jsonify({"status": "error", "message": "Blog not found"}), 404
-            
-        slug = _get_unique_slug(cursor, data.get('title'), blog_id)
-        cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, blog_id))
-        conn.commit()
-        updated_blog['slug'] = slug
-
-        if updated_blog.get('tags'):
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (blog_id,))
+        updated_blog = cursor.fetchone()
+        
+        if updated_blog and updated_blog.get('tags'):
             try:
                 updated_blog['tags'] = json.loads(updated_blog['tags'])
-            except:
+            except (TypeError, json.JSONDecodeError):
                 pass
                 
         return jsonify({"status": "success", "data": updated_blog}), 200
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error updating blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to update blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to update blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -285,23 +290,18 @@ def delete_blog(blog_id):
         
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.callproc('sp_blog_ops', ('delete', blog_id, '', '', '', '', '', '', '', '[]', 0))
+        cursor.execute("DELETE FROM blogs WHERE id = %s", (blog_id,))
         conn.commit()
         
-        deleted_count = 0
-        for result in cursor.stored_results():
-            row = result.fetchone()
-            if row:
-                deleted_count = row.get('deleted_count', 0)
-                
-        if deleted_count == 0:
+        if cursor.rowcount == 0:
             return jsonify({"status": "error", "message": "Blog not found or already deleted"}), 404
             
         return jsonify({"status": "success", "message": "Blog deleted successfully"}), 200
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error deleting blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to delete blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to delete blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
