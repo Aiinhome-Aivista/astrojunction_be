@@ -132,12 +132,9 @@ def get_blog(blog_id):
         
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.callproc('sp_blog_ops', ('get_one', blog_id, '', '', '', '', '', '', '', '[]', 0))
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (blog_id,))
+        blog = cursor.fetchone()
         
-        blog = None
-        for result in cursor.stored_results():
-            blog = result.fetchone()
-            
         if not blog:
             return jsonify({"status": "error", "message": "Blog not found"}), 404
             
@@ -175,47 +172,53 @@ def create_blog():
         
     try:
         cursor = conn.cursor(dictionary=True)
-        
+        title_val = str(data.get('title', '')).strip()[:250]
+        content_val = data.get('content', '')
+        preview_val = str(data.get('preview', ''))[:480] if data.get('preview') else None
+        image_url_val = str(data.get('image_url', ''))[:480] if data.get('image_url') else None
+        category_val = str(data.get('category', ''))[:100] if data.get('category') else None
+        sub_category_val = str(data.get('sub_category', ''))[:100] if data.get('sub_category') else None
+        status_raw = str(data.get('status', 'Draft')).strip()
+        status_val = 'Published' if status_raw.lower() == 'published' else 'Draft'
         tags_json = json.dumps(data.get('tags', []))
+        pinned_val = 1 if data.get('pinned') else 0
         
-        args = (
-            'create',
-            0,
-            data.get('title'),
-            data.get('content'),
-            data.get('preview'),
-            data.get('image_url'),
-            data.get('category'),
-            data.get('sub_category'),
-            data.get('status', 'Draft'),
+        # Pre-generate unique slug
+        slug = _get_unique_slug(cursor, title_val, 0)
+        
+        cursor.execute("""
+            INSERT INTO blogs (title, slug, content, preview, image_url, category, sub_category, status, tags, pinned)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            title_val,
+            slug,
+            content_val,
+            preview_val,
+            image_url_val,
+            category_val,
+            sub_category_val,
+            status_val,
             tags_json,
-            1 if data.get('pinned') else 0
-        )
-        
-        cursor.callproc('sp_blog_ops', args)
+            pinned_val
+        ))
         conn.commit()
+        new_id = cursor.lastrowid
         
-        new_blog = None
-        for result in cursor.stored_results():
-            new_blog = result.fetchone()
-            
-        if new_blog:
-            new_id = new_blog.get('id')
-            slug = _get_unique_slug(cursor, data.get('title'), new_id)
-            cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, new_id))
-            conn.commit()
-            new_blog['slug'] = slug
-            if new_blog.get('tags'):
-                try:
-                    new_blog['tags'] = json.loads(new_blog['tags'])
-                except:
-                    pass
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (new_id,))
+        new_blog = cursor.fetchone()
+        
+        if new_blog and new_blog.get('tags'):
+            try:
+                new_blog['tags'] = json.loads(new_blog['tags'])
+            except (TypeError, json.JSONDecodeError):
+                pass
                 
         return jsonify({"status": "success", "data": new_blog}), 201
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error creating blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to create blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to create blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -232,12 +235,31 @@ def update_blog(blog_id):
     try:
         cursor = conn.cursor(dictionary=True)
         
+        # Verify blog exists first
+        cursor.execute("SELECT id FROM blogs WHERE id = %s", (blog_id,))
+        if not cursor.fetchone():
+            return jsonify({"status": "error", "message": "Blog not found"}), 404
+            
         tags_json = json.dumps(data.get('tags', []))
+        pinned_val = 1 if data.get('pinned') else 0
+        slug = _get_unique_slug(cursor, data.get('title'), blog_id)
         
-        args = (
-            'update',
-            blog_id,
+        cursor.execute("""
+            UPDATE blogs
+            SET title = %s,
+                slug = %s,
+                content = %s,
+                preview = %s,
+                image_url = %s,
+                category = %s,
+                sub_category = %s,
+                status = %s,
+                tags = %s,
+                pinned = %s
+            WHERE id = %s
+        """, (
             data.get('title'),
+            slug,
             data.get('content'),
             data.get('preview'),
             data.get('image_url'),
@@ -245,35 +267,26 @@ def update_blog(blog_id):
             data.get('sub_category'),
             data.get('status', 'Draft'),
             tags_json,
-            1 if data.get('pinned') else 0
-        )
-        
-        cursor.callproc('sp_blog_ops', args)
+            pinned_val,
+            blog_id
+        ))
         conn.commit()
         
-        updated_blog = None
-        for result in cursor.stored_results():
-            updated_blog = result.fetchone()
-            
-        if not updated_blog:
-            return jsonify({"status": "error", "message": "Blog not found"}), 404
-            
-        slug = _get_unique_slug(cursor, data.get('title'), blog_id)
-        cursor.execute("UPDATE blogs SET slug = %s WHERE id = %s", (slug, blog_id))
-        conn.commit()
-        updated_blog['slug'] = slug
-
-        if updated_blog.get('tags'):
+        cursor.execute("SELECT * FROM blogs WHERE id = %s", (blog_id,))
+        updated_blog = cursor.fetchone()
+        
+        if updated_blog and updated_blog.get('tags'):
             try:
                 updated_blog['tags'] = json.loads(updated_blog['tags'])
-            except:
+            except (TypeError, json.JSONDecodeError):
                 pass
                 
         return jsonify({"status": "success", "data": updated_blog}), 200
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error updating blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to update blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to update blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -285,23 +298,18 @@ def delete_blog(blog_id):
         
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.callproc('sp_blog_ops', ('delete', blog_id, '', '', '', '', '', '', '', '[]', 0))
+        cursor.execute("DELETE FROM blogs WHERE id = %s", (blog_id,))
         conn.commit()
         
-        deleted_count = 0
-        for result in cursor.stored_results():
-            row = result.fetchone()
-            if row:
-                deleted_count = row.get('deleted_count', 0)
-                
-        if deleted_count == 0:
+        if cursor.rowcount == 0:
             return jsonify({"status": "error", "message": "Blog not found or already deleted"}), 404
             
         return jsonify({"status": "success", "message": "Blog deleted successfully"}), 200
     except Exception as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"Error deleting blog: {e}")
-        return jsonify({"status": "error", "message": "Failed to delete blog"}), 500
+        return jsonify({"status": "error", "message": f"Failed to delete blog: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
@@ -478,11 +486,11 @@ def increment_blog_share(blog_id):
 
 
 def upload_blog_image():
-    """Handle secure image upload for blog posts."""
+    """Handle secure image upload for blog posts with auto-compression to WebP."""
     import os, time
     from werkzeug.utils import secure_filename
+    from PIL import Image
     
-    # Read upload path dynamically from .env or default to upload/blogs_image
     env_folder = os.getenv("BLOG_UPLOAD_DIR", "upload/blogs_image").strip().replace('\\', '/')
     base_dir = os.path.dirname(os.path.dirname(__file__))
     upload_folder = os.path.join(base_dir, *env_folder.split('/'))
@@ -500,28 +508,49 @@ def upload_blog_image():
         return jsonify({"error": "File type not allowed"}), 400
         
     name = secure_filename(file.filename.rsplit('.', 1)[0])
-    filename = f"{name}_{int(time.time())}.{ext}"
     os.makedirs(upload_folder, exist_ok=True)
-    file.save(os.path.join(upload_folder, filename))
     
-    # Return normalized web path (e.g. /upload/blogs_image/xyz.png)
+    # Auto-compress and convert to WebP to eliminate multi-megabyte image downloads
+    try:
+        with Image.open(file) as im:
+            if im.mode == 'RGBA':
+                im = im.convert('RGB')
+            im.thumbnail((750, 750), Image.Resampling.LANCZOS)
+            filename = f"{name}_{int(time.time())}.webp"
+            save_path = os.path.join(upload_folder, filename)
+            im.save(save_path, 'WEBP', quality=80, method=6)
+    except Exception as img_err:
+        print(f"Fallback saving raw image: {img_err}")
+        filename = f"{name}_{int(time.time())}.{ext}"
+        file.seek(0)
+        file.save(os.path.join(upload_folder, filename))
+    
+    # Return normalized web path (e.g. /upload/blogs_image/xyz.webp)
     web_path = f"/{env_folder}/{filename}"
     return jsonify({"url": web_path}), 200
 
 
 def serve_uploaded_file(filename):
-    """Serve uploaded blog images and files."""
+    """Serve uploaded blog images and files with long-term caching and WebP negotiation."""
     import os
-    from flask import send_from_directory
+    from flask import send_from_directory, request
     
     root_dir = os.path.dirname(os.path.dirname(__file__))
-    # Check in upload directory
     upload_dir = os.path.join(root_dir, 'upload')
+    
+    # Auto-serve .webp if it exists on disk
+    base, ext = os.path.splitext(filename)
+    if ext.lower() in ('.png', '.jpg', '.jpeg'):
+        webp_candidate = f"{base}.webp"
+        if os.path.exists(os.path.join(upload_dir, webp_candidate)):
+            return send_from_directory(upload_dir, webp_candidate, max_age=31536000, mimetype='image/webp')
+
+    # Check in upload directory
     if os.path.exists(os.path.join(upload_dir, filename)):
-        return send_from_directory(upload_dir, filename)
+        return send_from_directory(upload_dir, filename, max_age=31536000)
     # Check in static/uploads directory fallback
     static_upload_dir = os.path.join(root_dir, 'static', 'uploads')
     if os.path.exists(os.path.join(static_upload_dir, filename)):
-        return send_from_directory(static_upload_dir, filename)
+        return send_from_directory(static_upload_dir, filename, max_age=31536000)
         
-    return send_from_directory(upload_dir, filename)
+    return send_from_directory(upload_dir, filename, max_age=31536000)
